@@ -9,13 +9,12 @@ import tempfile
 import io
 import os
 
-# Page Configuration
+# --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Bee Health & Security Monitor", layout="wide", page_icon="🐝")
 
-# --- CUSTOM CSS FOR EYE-CATCHY & MOBILE-FRIENDLY TABS ---
+# --- CUSTOM CSS FOR TABS ---
 st.markdown("""
 <style>
-    /* Tab styling */
     .stTabs [data-baseweb="tab-list"] {
         gap: 15px;
         display: flex;
@@ -32,279 +31,241 @@ st.markdown("""
         color: #5a4609;
         transition: all 0.3s ease-in-out;
     }
-    /* Active Tab */
     .stTabs [aria-selected="true"] {
         background-color: #ffc107 !important; 
         color: #000 !important;
         border: 2px solid #b38600 !important;
         transform: scale(1.05);
     }
-    .stTabs [data-baseweb="tab"]:hover {
-        background-color: #ffe082;
-    }
-    
-    /* Mobile Phone Vertical Layout */
     @media (max-width: 768px) {
-        .stTabs [data-baseweb="tab-list"] {
-            flex-direction: column;
-        }
-        .stTabs[data-baseweb="tab"] {
-            width: 100%;
-            text-align: center;
-        }
+        .stTabs [data-baseweb="tab-list"] { flex-direction: column; }
+        .stTabs [data-baseweb="tab"] { width: 100%; text-align: center; }
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Helper: Vibration Trigger (Works on Android/Chrome)
+# --- HELPERS ---
+
 def trigger_vibration():
+    """Triggers mobile vibration pattern."""
     components.html("""
         <script>
             if ("vibrate" in navigator) {
-                // Vibrate a strong SOS pattern
                 navigator.vibrate([500, 200, 500, 200, 1000]);
             }
         </script>
     """, height=0, width=0)
 
-# 1. Load Models
 @st.cache_resource
 def load_models():
-    bee_mod = YOLO('models/bee_best.pt')
-    env_mod = YOLO('models/enemy_best.pt')
-    return bee_mod, env_mod
+    """Loads YOLO models with robust path handling for Streamlit Cloud."""
+    # This gets the absolute path of the current script's directory
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    bee_path = os.path.join(base_dir, 'models', 'bee_best.pt')
+    enemy_path = os.path.join(base_dir, 'models', 'enemy_best.pt')
+    
+    # Validation check
+    if not os.path.exists(bee_path) or not os.path.exists(enemy_path):
+        st.error(f"Critical Error: Model files not found in {os.path.join(base_dir, 'models')}")
+        st.stop()
+        
+    return YOLO(bee_path), YOLO(enemy_path)
 
-bee_model, enemy_model = load_models()
-
-# Supported Formats
-IMG_FORMATS = ['jpg', 'png', 'jpeg', 'webp', 'bmp', 'tiff', 'heic']
-VID_FORMATS =['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv']
-
-# Helper Logic: Spatial Smoothing
 def get_spatial_smoothing(results):
+    """Adjusts classes based on nearest neighbor majority."""
+    if not results or len(results[0].boxes) < 3:
+        return results
+    
     boxes = results[0].boxes.xyxy.cpu().numpy()
     classes = results[0].boxes.cls.cpu().numpy()
-    
-    if len(boxes) < 3: 
-        return results # Need at least 3 bees to cluster
+    coords = results[0].boxes.xywh.cpu().numpy()[:, :2] 
     
     new_classes = classes.copy()
-    coords = results[0].boxes.xywh.cpu().numpy()[:, :2] # Get centers
     dist_matrix = distance.cdist(coords, coords, 'euclidean')
 
     for i in range(len(new_classes)):
-        nn_indices = dist_matrix[i].argsort()[1:4] # 3 nearest neighbors
+        nn_indices = dist_matrix[i].argsort()[1:4] 
         neighbor_classes = classes[nn_indices]
-        # Overrule if middle is different from surrounding majority
         if len(set(neighbor_classes)) == 1 and neighbor_classes[0] != classes[i]:
             new_classes[i] = neighbor_classes[0]
             
     results[0].boxes.cls = new_classes
     return results
 
-# UI Header
+# --- INITIALIZE ---
+bee_model, enemy_model = load_models()
+IMG_FORMATS = ['jpg', 'png', 'jpeg', 'webp', 'bmp', 'tiff']
+VID_FORMATS = ['mp4', 'mov', 'avi', 'mkv']
+
 st.title("🐝 Bee Health & Security Monitor")
 st.markdown("---")
 
-# Setup 3 Main Tabs based on new requirements
 tabs = st.tabs(["🔍 1. Surveillance", "🧬 2. Species Classification", "🎥 3. Video Mode"])
 
 # ==========================================
-# --- TAB 1: SURVEILLANCE ---
+# TAB 1: SURVEILLANCE
 # ==========================================
 with tabs[0]:
     st.header("Surveillance: Bee & Pest Counter")
-    file = st.file_uploader("Upload Image", type=IMG_FORMATS, key="t1")
+    file_t1 = st.file_uploader("Upload Image for Hive Scan", type=IMG_FORMATS, key="uploader_t1")
     
-    if file:
-        img = Image.open(file).convert("RGB")
+    if file_t1:
+        img = Image.open(file_t1).convert("RGB")
         img_cv = np.array(img)
         
-        # Initial scan to count
-        initial_bee = bee_model(img, conf=0.25, verbose=False)[0]
-        initial_pest = enemy_model(img, conf=0.25, verbose=False)[0]
+        # Initial scan to determine density
+        pre_bee = bee_model(img, conf=0.25, verbose=False)[0]
+        density_count = len(pre_bee.boxes)
         
-        total_bees = len(initial_bee.boxes)
-        total_pests = len(initial_pest.boxes)
-        
-        # Adjust confidence and bounding box size based on bee count
-        if total_bees < 5:
-            conf_level = 0.50  # High confidence
-            line_w = 3         # Large box
+        # Logic: Adjust confidence based on bee count
+        if density_count < 5:
+            c_val, l_wid = 0.50, 3  # High confidence, thick lines
         else:
-            conf_level = 0.15  # Low confidence interval
-            line_w = 1         # Small box
+            c_val, l_wid = 0.15, 1  # Low confidence, thin lines
             
-        # Final Run
-        final_bee = bee_model(img, conf=conf_level, verbose=False)[0]
-        final_pest = enemy_model(img, conf=conf_level, verbose=False)[0]
+        # Final Processing
+        res_bee = bee_model(img, conf=c_val, verbose=False)[0]
+        res_pest = enemy_model(img, conf=c_val, verbose=False)[0]
         
-        # Override class names to only show "Bee" or "Bee Enemy"
-        final_bee.names = {k: "Bee" for k in final_bee.names}
-        final_pest.names = {k: "Bee Enemy" for k in final_pest.names}
+        # Rename classes for the final report download
+        res_bee.names = {k: "Bee" for k in res_bee.names}
+        res_pest.names = {k: "Bee Enemy" for k in res_pest.names}
         
-        # Combine plotting onto one image array
-        annotated_img = final_bee.plot(img=img_cv.copy(), line_width=line_w)
-        annotated_img = final_pest.plot(img=annotated_img, line_width=line_w)
+        # Create Annotated Image (for download only)
+        ann_img = res_bee.plot(img=img_cv.copy(), line_width=l_wid)
+        ann_img = res_pest.plot(img=ann_img, line_width=l_wid)
+        ann_pil = Image.fromarray(ann_img)
         
-        # Convert back to PIL for download
-        annotated_pil = Image.fromarray(annotated_img)
+        # UI: Show clean image
+        st.subheader("Hive View (Original)")
+        st.image(img, use_container_width=True)
         
-        # --- UI DISPLAY ---
-        st.subheader("Original Image (Clean)")
-        st.image(img, use_container_width=True) # Do not show annotated on UI as requested
+        # Stats
+        b_count = len(res_bee.boxes)
+        p_count = len(res_pest.boxes)
         
-        st.markdown(f"### 📊 Detection Report")
-        st.markdown(f"- **Total Bees Detected:** {len(final_bee.boxes)}")
-        st.markdown(f"- **Total Pests Detected:** {len(final_pest.boxes)}")
+        st.markdown("### 📊 Detection Report")
+        col_a, col_b = st.columns(2)
+        col_a.metric("Bees Found", b_count)
+        col_b.metric("Pests Found", p_count)
         
-        if len(final_pest.boxes) > 5:
-            st.error("🔴 WARNING: High Pest Contamination! Please safeguard the hive immediately!")
-            trigger_vibration() # Vibrate device
+        if p_count > 5:
+            st.error("🔴 WARNING: High Pest Contamination! Immediate hive inspection required.")
+            trigger_vibration()
         
-        # Download logic
-        buf = io.BytesIO()
-        annotated_pil.save(buf, format="JPEG")
-        byte_im = buf.getvalue()
+        # Download preparation
+        buf_img = io.BytesIO()
+        ann_pil.save(buf_img, format="JPEG")
         
-        report_text = f"Total Bees: {len(final_bee.boxes)}\nTotal Pests: {len(final_pest.boxes)}"
+        report_text = f"BEE MONITORING REPORT\n--------------------\nTotal Bees: {b_count}\nTotal Pests: {p_count}"
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.download_button("📥 Download Annotated Image", data=byte_im, file_name="surveillance_annotated.jpg", mime="image/jpeg")
-        with col2:
-            st.download_button("📝 Download Text Report", data=report_text, file_name="surveillance_report.txt", mime="text/plain")
+        st.markdown("---")
+        c1, c2 = st.columns(2)
+        c1.download_button("📥 Download Annotated Image", buf_img.getvalue(), "hive_analysis.jpg", "image/jpeg")
+        c2.download_button("📝 Download Text Report", report_text, "hive_report.txt", "text/plain")
 
 # ==========================================
-# --- TAB 2: SPECIES CLUSTERS ---
+# TAB 2: SPECIES CLUSTERS
 # ==========================================
 with tabs[1]:
     st.header("Species Classification & Filtering")
-    file = st.file_uploader("Upload Image", type=IMG_FORMATS, key="t2")
+    file_t2 = st.file_uploader("Upload Image for Species ID", type=IMG_FORMATS, key="uploader_t2")
     
-    if file:
-        img = Image.open(file).convert("RGB")
+    if file_t2:
+        img = Image.open(file_t2).convert("RGB")
+        img_cv = np.array(img)
         
-        # Run with low confidence interval as requested
-        res_bee = bee_model(img, conf=0.20)[0]
-        res_pest = enemy_model(img, conf=0.20)[0]
+        # Run Detection (0.20 confidence as requested)
+        res_bee = bee_model(img, conf=0.20, verbose=False)[0]
+        res_pest = enemy_model(img, conf=0.20, verbose=False)[0]
         
-        bee_count = len(res_bee.boxes)
-        pest_count = len(res_pest.boxes)
+        # Apply Smoothing
+        res_bee = get_spatial_smoothing([res_bee])[0]
+        res_pest = get_spatial_smoothing([res_pest])[0]
         
-        if bee_count == 0 and pest_count == 0:
-            st.info("🟢 No Bee or Pest detected in the image.")
-            st.image(img)
+        # Extract Species names
+        bee_species = set([res_bee.names[int(c)] for c in res_bee.boxes.cls.cpu().numpy()])
+        pest_species = set([res_pest.names[int(c)] for c in res_pest.boxes.cls.cpu().numpy()])
+        
+        if not bee_species and not pest_species:
+            st.info("No organisms detected.")
         else:
-            status =[]
-            if bee_count > 0: status.append("Bee")
-            if pest_count > 0: status.append("Pest")
+            if bee_species: st.success(f"🐝 **Bee Species:** {', '.join(bee_species)}")
+            if pest_species: st.warning(f"🪳 **Pest Species:** {', '.join(pest_species)}")
             
-            st.success(f"🔍 Presence Detected: **{' and '.join(status)}**")
-            
-            # Apply Spatial Smoothing (cluster adjustment)
-            res_bee_smoothed = get_spatial_smoothing([res_bee])[0]
-            res_pest_smoothed = get_spatial_smoothing([res_pest])[0]
-            
-            # Extract unique species names detected
-            detected_bee_species = set([res_bee_smoothed.names[int(c)] for c in res_bee_smoothed.boxes.cls.cpu().numpy()])
-            detected_pest_species = set([res_pest_smoothed.names[int(c)] for c in res_pest_smoothed.boxes.cls.cpu().numpy()])
-            
-            if detected_bee_species:
-                st.write(f"**Bee Species Found:** {', '.join(detected_bee_species)}")
-            if detected_pest_species:
-                st.write(f"**Pest Species Found:** {', '.join(detected_pest_species)}")
-                
-            # Plot
-            img_cv = np.array(img)
-            ann_img = res_bee_smoothed.plot(img=img_cv.copy(), line_width=2)
-            ann_img = res_pest_smoothed.plot(img=ann_img, line_width=2)
-            
-            st.image(ann_img, caption="Classification with Spatial Clustering Logic Applied", use_container_width=True)
+            # Show Annotated
+            ann_img = res_bee.plot(img=img_cv.copy())
+            ann_img = res_pest.plot(img=ann_img)
+            st.image(ann_img, caption="Classification & Spatial Clustering Result", use_container_width=True)
 
 # ==========================================
-# --- TAB 3: VIDEO TRACKING ---
+# TAB 3: VIDEO TRACKING
 # ==========================================
 with tabs[2]:
     st.header("Video Tracking: Joint Detection Mode")
-    v_file = st.file_uploader("Upload Video", type=VID_FORMATS, key="t3")
+    v_file = st.file_uploader("Upload Hive Video", type=VID_FORMATS, key="uploader_t3")
     
     if v_file:
-        tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-        tfile.write(v_file.read())
-        tfile.close()
-        
-        cap = cv2.VideoCapture(tfile.name)
-        
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        # Create temporary file for the uploaded video
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as t_in:
+            t_in.write(v_file.read())
+            in_path = t_in.name
+            
+        cap = cv2.VideoCapture(in_path)
         fps = int(cap.get(cv2.CAP_PROP_FPS))
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_f = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        # Temp file for processed video
-        output_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-        output_temp.close()
-        
+        # Temp output path
+        out_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_temp.name, fourcc, fps, (width, height))
+        out_writer = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
         
-        video_placeholder = st.empty()
-        progress_bar = st.progress(0)
+        video_ui = st.empty()
+        prog_bar = st.progress(0)
         
-        # Tracking unique IDs
         unique_bees = set()
         unique_pests = set()
         
-        frame_idx = 0
+        frame_count = 0
         while cap.isOpened():
             ret, frame = cap.read()
-            if not ret: 
-                break
-                
-            # Run tracking
-            r1 = bee_model.track(frame, persist=True, verbose=False)
-            r2 = enemy_model.track(frame, persist=True, verbose=False)
+            if not ret: break
             
-            # Store Unique IDs
-            if r1[0].boxes.id is not None:
-                unique_bees.update(r1[0].boxes.id.cpu().numpy())
-            if r2[0].boxes.id is not None:
-                unique_pests.update(r2[0].boxes.id.cpu().numpy())
+            # Run Tracking (persist=True maintains IDs)
+            track_bee = bee_model.track(frame, persist=True, verbose=False)
+            track_pest = enemy_model.track(frame, persist=True, verbose=False)
+            
+            # Collect Unique IDs
+            if track_bee[0].boxes.id is not None:
+                unique_bees.update(track_bee[0].boxes.id.cpu().numpy().astype(int))
+            if track_pest[0].boxes.id is not None:
+                unique_pests.update(track_pest[0].boxes.id.cpu().numpy().astype(int))
                 
             # Plot frame
-            plot_frame = r1[0].plot()
-            plot_frame = r2[0].plot(img=plot_frame)
+            f_plot = track_bee[0].plot()
+            f_plot = track_pest[0].plot(img=f_plot)
+            out_writer.write(f_plot)
             
-            out.write(plot_frame)
+            # Every 5th frame, update the UI preview to keep it fast
+            if frame_count % 5 == 0:
+                video_ui.image(cv2.cvtColor(f_plot, cv2.COLOR_BGR2RGB), use_container_width=True)
             
-            # Update UI occasionally to prevent browser lag
-            if frame_idx % 3 == 0:
-                # Convert BGR to RGB for Streamlit rendering
-                ui_frame = cv2.cvtColor(plot_frame, cv2.COLOR_BGR2RGB)
-                video_placeholder.image(ui_frame, channels="RGB", use_container_width=True)
-            
-            frame_idx += 1
-            progress_bar.progress(min(frame_idx / total_frames, 1.0))
+            frame_count += 1
+            prog_bar.progress(min(frame_count / total_f, 1.0))
             
         cap.release()
-        out.release()
+        out_writer.release()
         
-        st.success("✅ Video Processing Complete!")
-        st.markdown(f"### 📊 Final Tracking Report")
-        st.markdown(f"- **Total Unique Bees Tracked:** {len(unique_bees)}")
-        st.markdown(f"- **Total Unique Pests Tracked:** {len(unique_pests)}")
+        st.success("✅ Tracking Finished!")
+        st.markdown(f"**Total Unique Bees Tracked:** {len(unique_bees)}")
+        st.markdown(f"**Total Unique Pests Tracked:** {len(unique_pests)}")
         
-        # Read the saved output video for downloading
-        with open(output_temp.name, 'rb') as f:
-            video_bytes = f.read()
+        with open(out_path, 'rb') as f_vid:
+            st.download_button("📥 Download Processed Video", f_vid.read(), "bee_tracking.mp4", "video/mp4")
             
-        st.download_button(
-            label="📥 Download Processed Video",
-            data=video_bytes,
-            file_name="processed_tracking_video.mp4",
-            mime="video/mp4"
-        )
-        
-        # Cleanup temp files
-        os.unlink(tfile.name)
-        os.unlink(output_temp.name)
+        # Cleanup
+        if os.path.exists(in_path): os.remove(in_path)
+        if os.path.exists(out_path): os.remove(out_path)

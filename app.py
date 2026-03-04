@@ -84,7 +84,7 @@ with tabs[0]:
             pre_res = bee_model(img, conf=0.20, verbose=False)[0]
             bee_count = len(pre_res.boxes)
             
-            # Logic: <10 bees (0.50 conf) | >=10 bees (0.20 conf)
+            # Logic: <10 bees (0.35 conf) | >=10 bees (0.20 conf)
             final_conf = 0.50 if bee_count < 10 else 0.20
             
             results = bee_model(img, conf=final_conf, verbose=False)[0]

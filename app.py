@@ -1,5 +1,5 @@
 import os
-# Fix for settings warning
+# Fix for Streamlit Cloud settings warning
 os.environ['YOLO_CONFIG_DIR'] = '/tmp'
 
 import streamlit as st
@@ -14,7 +14,7 @@ import io
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Bee & Pest Health Monitor", layout="wide", page_icon="🐝")
 
-# --- SIDEBAR ---
+# --- SIDEBAR DISPLAY ---
 st.sidebar.header("🖼️ Display Settings")
 zoom_val = st.sidebar.slider("Image Scale (Zoom)", min_value=300, max_value=2000, value=800)
 
@@ -31,6 +31,7 @@ st.markdown("""
         background-color: #ffc107; color: black; border: 2px solid #b38600; 
     }
     .stImage > img { max-height: 75vh; object-fit: contain; display: block; margin: auto; }
+    .footer { text-align: center; padding: 20px; font-weight: bold; color: #5a4609; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -46,10 +47,9 @@ def load_models():
     return YOLO(b_path), YOLO(e_path)
 
 def process_image_memory_safe(file):
-    """Resizes large images to prevent Streamlit Cloud OOM crashes."""
+    """Prevents OOM crash on Streamlit Cloud by resizing large files."""
     img = Image.open(file).convert("RGB")
-    # Resize if image is too large (Streamlit RAM is very limited)
-    max_size = 1024
+    max_size = 1024 
     if max(img.size) > max_size:
         img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
     return img
@@ -64,12 +64,11 @@ def get_image_download(img_array):
 bee_model, enemy_model = load_models()
 
 st.title("🐝 Hive Health & Security Monitor")
-st.info("System optimized for stability. Confidence: 0.20")
 
 tabs = st.tabs(["🔍 Bee Detector", "🧬 Bee Species ID", "🛡️ Pest Detector", "🦠 Pest Species ID", "🎥 Video Tracking"])
 
 # ==========================================
-# 1. BEE DETECTOR
+# 1. BEE DETECTOR (Adaptive Confidence)
 # ==========================================
 with tabs[0]:
     st.header("Bee Counter")
@@ -80,12 +79,23 @@ with tabs[0]:
         
         if st.button("🚀 Run Bee Detection", key="btn1"):
             img_cv = np.array(img)
-            results = bee_model(img, conf=0.20, verbose=False)[0]
+            
+            # Pre-scan to check density
+            pre_res = bee_model(img, conf=0.20, verbose=False)[0]
+            bee_count = len(pre_res.boxes)
+            
+            # Logic: <10 bees (0.50 conf) | >=10 bees (0.20 conf)
+            final_conf = 0.50 if bee_count < 10 else 0.20
+            
+            results = bee_model(img, conf=final_conf, verbose=False)[0]
             results.names = {i: "Bee" for i in range(len(results.names))}
-            ann_img = results.plot(img=img_cv.copy(), line_width=2)
-            st.subheader(f"📊 {len(results.boxes)} Bees Found")
+            
+            # Annotated with thin lines and small text
+            ann_img = results.plot(img=img_cv.copy(), line_width=1, font_size=10)
+            
+            st.subheader(f"📊 {len(results.boxes)} Bees Found (Confidence set to {final_conf})")
             st.image(ann_img, width=zoom_val)
-            st.download_button("📥 Download", get_image_download(ann_img), "bees.jpg")
+            st.download_button("📥 Download", get_image_download(ann_img), "bee_count.jpg")
 
 # ==========================================
 # 2. BEE SPECIES ID (Highest Confidence)
@@ -103,11 +113,11 @@ with tabs[1]:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
                 top = results[int(best_idx)]
                 st.success(f"### {top.names[int(top.boxes.cls[0])]} (Conf: {top.boxes.conf[0]:.2f})")
-                st.image(top.plot(), width=zoom_val)
+                st.image(top.plot(line_width=1, font_size=10), width=zoom_val)
             else: st.warning("No bees detected.")
 
 # ==========================================
-# 3. PEST DETECTOR
+# 3. PEST DETECTOR (Standard 0.20)
 # ==========================================
 with tabs[2]:
     st.header("Bee Enemy Detector")
@@ -120,14 +130,17 @@ with tabs[2]:
             img_cv = np.array(img)
             results = enemy_model(img, conf=0.20, verbose=False)[0]
             results.names = {i: "Pest" for i in range(len(results.names))}
-            ann_img = results.plot(img=img_cv.copy(), line_width=2)
+            
+            # Small text labels
+            ann_img = results.plot(img=img_cv.copy(), line_width=1, font_size=10)
             count = len(results.boxes)
             st.subheader(f"📊 {count} Pests Found")
+            
             if count > 3:
                 st.error("🚨 ALERT: Invasion Activity!")
                 trigger_vibration()
             st.image(ann_img, width=zoom_val)
-            st.download_button("📥 Download", get_image_download(ann_img), "pests.jpg")
+            st.download_button("📥 Download", get_image_download(ann_img), "pest_count.jpg")
 
 # ==========================================
 # 4. PEST SPECIES ID (Highest Confidence)
@@ -145,7 +158,7 @@ with tabs[3]:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
                 top = results[int(best_idx)]
                 st.warning(f"### {top.names[int(top.boxes.cls[0])]} (Conf: {top.boxes.conf[0]:.2f})")
-                st.image(top.plot(), width=zoom_val)
+                st.image(top.plot(line_width=1, font_size=10), width=zoom_val)
             else: st.info("No threats identified.")
 
 # ==========================================
@@ -172,10 +185,16 @@ with tabs[4]:
                 res = model.track(frame, persist=True, conf=0.20, verbose=False)[0]
                 res.names = {i: mode[:-1] for i in range(len(res.names))}
                 if res.boxes.id is not None: u_ids.update(res.boxes.id.cpu().numpy().astype(int))
-                f_plot = res.plot()
+                
+                f_plot = res.plot(line_width=1, font_size=10)
                 cv2.putText(f_plot, f"Total Unique: {len(u_ids)}", (40, 50), 1, 2, (255,255,255), 2)
+                
                 out.write(f_plot)
                 vid_holder.image(cv2.cvtColor(f_plot, cv2.COLOR_BGR2RGB), use_container_width=True)
             cap.release(); out.release()
             st.success(f"Found {len(u_ids)} unique {mode}.")
             with open(t_out.name, 'rb') as f_v: st.download_button("📥 Download", f_v, "tracking.mp4")
+
+# --- FOOTER ---
+st.markdown("---")
+st.markdown('<p class="footer">Developed by - Sandesh Subedi</p>', unsafe_allow_html=True)

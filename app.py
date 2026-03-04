@@ -132,7 +132,7 @@ with tabs[1]:
 # ==========================================
 with tabs[2]:
     st.header("Pest Detection (Bee Enemy)")
-    st.info("💡 Variable Threshold: Hornets (0.65) | Others (0.35) to prevent confusion with bees.")
+    st.info("💡 Variable Threshold: Hornets (0.40) | Others (0.35) to prevent confusion with bees.")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="pest_det_up")
     if file:
         img = Image.open(file).convert("RGB")
@@ -169,7 +169,7 @@ with tabs[3]:
         st.image(img, width=display_width)
         
         if st.button("🦠 ID Pest Species", key="btn_pest_spec"):
-            raw_results = enemy_model(img, conf=0.20, verbose=False)[0]
+            raw_results = enemy_model(img, conf=0.10, verbose=False)[0]
             filtered = smart_filter_pests(raw_results)
             
             if len(filtered.boxes) > 0:

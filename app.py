@@ -1,5 +1,5 @@
 import os
-# Fix for Streamlit Cloud Ultralytics settings warning
+# Fix for settings warning
 os.environ['YOLO_CONFIG_DIR'] = '/tmp'
 
 import streamlit as st
@@ -14,7 +14,7 @@ import io
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Bee & Pest Health Monitor", layout="wide", page_icon="🐝")
 
-# --- SIDEBAR: DISPLAY CONTROLS ---
+# --- SIDEBAR ---
 st.sidebar.header("🖼️ Display Settings")
 zoom_val = st.sidebar.slider("Image Scale (Zoom)", min_value=300, max_value=2000, value=800)
 
@@ -30,7 +30,7 @@ st.markdown("""
         width: 100%; border-radius: 10px; font-weight: bold; height: 3.5em; 
         background-color: #ffc107; color: black; border: 2px solid #b38600; 
     }
-    .stImage > img { max-height: 80vh; object-fit: contain; display: block; margin-left: auto; margin-right: auto; }
+    .stImage > img { max-height: 75vh; object-fit: contain; display: block; margin: auto; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -39,14 +39,20 @@ def trigger_vibration():
     components.html("<script>if('vibrate' in navigator){navigator.vibrate([500,200,500]);}</script>", height=0, width=0)
 
 @st.cache_resource
-def load_bee_model():
+def load_models():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    return YOLO(os.path.join(base_dir, 'models', 'bee_best.pt'))
+    b_path = os.path.join(base_dir, 'models', 'bee_best.pt')
+    e_path = os.path.join(base_dir, 'models', 'enemy_best.pt')
+    return YOLO(b_path), YOLO(e_path)
 
-@st.cache_resource
-def load_enemy_model():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    return YOLO(os.path.join(base_dir, 'models', 'enemy_best.pt'))
+def process_image_memory_safe(file):
+    """Resizes large images to prevent Streamlit Cloud OOM crashes."""
+    img = Image.open(file).convert("RGB")
+    # Resize if image is too large (Streamlit RAM is very limited)
+    max_size = 1024
+    if max(img.size) > max_size:
+        img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+    return img
 
 def get_image_download(img_array):
     img_pil = Image.fromarray(img_array)
@@ -54,177 +60,122 @@ def get_image_download(img_array):
     img_pil.save(buf, format="JPEG")
     return buf.getvalue()
 
-def get_top_detection_only(results):
-    """Filters YOLO results to keep only the single detection with highest confidence."""
-    if not results or len(results.boxes) == 0:
-        return results
-    
-    conf_scores = results.boxes.conf.cpu().numpy()
-    best_idx = np.argmax(conf_scores)
-    return results[int(best_idx)]
-
-# --- LOAD MODELS ---
-bee_model = load_bee_model()
-enemy_model = load_enemy_model()
+# --- INITIALIZE ---
+bee_model, enemy_model = load_models()
 
 st.title("🐝 Hive Health & Security Monitor")
-st.info("Confidence Level standardized to 0.20 for all detections.")
+st.info("System optimized for stability. Confidence: 0.20")
 
-tabs = st.tabs([
-    "🔍 1. Bee Detector", 
-    "🧬 2. Bee Species ID", 
-    "🛡️ 3. Pest Detector", 
-    "🦠 4. Pest Species ID", 
-    "🎥 5. Video Tracking"
-])
+tabs = st.tabs(["🔍 Bee Detector", "🧬 Bee Species ID", "🛡️ Pest Detector", "🦠 Pest Species ID", "🎥 Video Tracking"])
 
 # ==========================================
-# 1. BEE DETECTOR (Generic label: Bee)
+# 1. BEE DETECTOR
 # ==========================================
 with tabs[0]:
     st.header("Bee Counter")
-    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up_bee_det")
+    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up1")
     if file:
-        img = Image.open(file).convert("RGB")
-        st.image(img, width=zoom_val, caption="Original View")
-        
-        if st.button("🚀 Run Bee Detection"):
-            img_cv = np.array(img)
-            results = bee_model(img, conf=0.20, verbose=False)[0]
-            
-            # Label strictly as "Bee"
-            results.names = {i: "Bee" for i in range(len(results.names))}
-            
-            # Draw on original photo (color preserved)
-            ann_img = results.plot(img=img_cv.copy(), line_width=2)
-            st.subheader(f"📊 Results: {len(results.boxes)} Bees Found")
-            st.image(ann_img, width=zoom_val)
-            st.download_button("📥 Download Annotated Image", get_image_download(ann_img), "bee_detection.jpg")
-
-# ==========================================
-# 2. BEE SPECIES ID (Highest Confidence Only)
-# ==========================================
-with tabs[1]:
-    st.header("Bee Species Identification")
-    st.markdown("Identifies only the single detection with the highest confidence.")
-    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up_bee_sp")
-    if file:
-        img = Image.open(file).convert("RGB")
+        img = process_image_memory_safe(file)
         st.image(img, width=zoom_val)
         
-        if st.button("🧬 Identify Primary Species"):
+        if st.button("🚀 Run Bee Detection", key="btn1"):
+            img_cv = np.array(img)
             results = bee_model(img, conf=0.20, verbose=False)[0]
-            top_result = get_top_detection_only(results)
-            
-            if top_result and len(top_result.boxes) > 0:
-                name = top_result.names[int(top_result.boxes.cls[0])]
-                conf = top_result.boxes.conf[0]
-                st.success(f"### Identified Species: {name} (Confidence: {conf:.2f})")
-                ann_img = top_result.plot()
-                st.image(ann_img, width=zoom_val)
-                st.download_button("📥 Download ID Result", get_image_download(ann_img), "bee_id.jpg")
-            else:
-                st.warning("No bee identified with 0.20 confidence.")
+            results.names = {i: "Bee" for i in range(len(results.names))}
+            ann_img = results.plot(img=img_cv.copy(), line_width=2)
+            st.subheader(f"📊 {len(results.boxes)} Bees Found")
+            st.image(ann_img, width=zoom_val)
+            st.download_button("📥 Download", get_image_download(ann_img), "bees.jpg")
 
 # ==========================================
-# 3. PEST DETECTOR (Generic label: Pest)
+# 2. BEE SPECIES ID (Highest Confidence)
+# ==========================================
+with tabs[1]:
+    st.header("Bee Species Classification")
+    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up2")
+    if file:
+        img = process_image_memory_safe(file)
+        st.image(img, width=zoom_val)
+        
+        if st.button("🧬 Identify Primary Species", key="btn2"):
+            results = bee_model(img, conf=0.20, verbose=False)[0]
+            if len(results.boxes) > 0:
+                best_idx = np.argmax(results.boxes.conf.cpu().numpy())
+                top = results[int(best_idx)]
+                st.success(f"### {top.names[int(top.boxes.cls[0])]} (Conf: {top.boxes.conf[0]:.2f})")
+                st.image(top.plot(), width=zoom_val)
+            else: st.warning("No bees detected.")
+
+# ==========================================
+# 3. PEST DETECTOR
 # ==========================================
 with tabs[2]:
     st.header("Bee Enemy Detector")
-    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up_pest_det")
+    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up3")
     if file:
-        img = Image.open(file).convert("RGB")
+        img = process_image_memory_safe(file)
         st.image(img, width=zoom_val)
         
-        if st.button("🛡️ Run Security Scan"):
+        if st.button("🛡️ Run Security Scan", key="btn3"):
             img_cv = np.array(img)
             results = enemy_model(img, conf=0.20, verbose=False)[0]
-            
-            # Label strictly as "Pest"
             results.names = {i: "Pest" for i in range(len(results.names))}
-            
             ann_img = results.plot(img=img_cv.copy(), line_width=2)
             count = len(results.boxes)
-            st.subheader(f"📊 Results: {count} Pests Found")
-            
+            st.subheader(f"📊 {count} Pests Found")
             if count > 3:
-                st.error("🚨 ALERT: Invasion Activity Detected!")
+                st.error("🚨 ALERT: Invasion Activity!")
                 trigger_vibration()
-                
             st.image(ann_img, width=zoom_val)
-            st.download_button("📥 Download Annotated Image", get_image_download(ann_img), "pest_detection.jpg")
+            st.download_button("📥 Download", get_image_download(ann_img), "pests.jpg")
 
 # ==========================================
-# 4. PEST SPECIES ID (Highest Confidence Only)
+# 4. PEST SPECIES ID (Highest Confidence)
 # ==========================================
 with tabs[3]:
     st.header("Pest Species Identification")
-    st.markdown("Identifies only the single detection with the highest confidence.")
-    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up_pest_sp")
+    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up4")
     if file:
-        img = Image.open(file).convert("RGB")
+        img = process_image_memory_safe(file)
         st.image(img, width=zoom_val)
         
-        if st.button("🦠 Identify Primary Pest"):
+        if st.button("🦠 Identify Primary Pest", key="btn4"):
             results = enemy_model(img, conf=0.20, verbose=False)[0]
-            top_result = get_top_detection_only(results)
-            
-            if top_result and len(top_result.boxes) > 0:
-                name = top_result.names[int(top_result.boxes.cls[0])]
-                conf = top_result.boxes.conf[0]
-                st.warning(f"### Detected Threat: {name} (Confidence: {conf:.2f})")
-                ann_img = top_result.plot()
-                st.image(ann_img, width=zoom_val)
-                st.download_button("📥 Download ID Result", get_image_download(ann_img), "pest_id.jpg")
-            else:
-                st.info("No pests identified with 0.20 confidence.")
+            if len(results.boxes) > 0:
+                best_idx = np.argmax(results.boxes.conf.cpu().numpy())
+                top = results[int(best_idx)]
+                st.warning(f"### {top.names[int(top.boxes.cls[0])]} (Conf: {top.boxes.conf[0]:.2f})")
+                st.image(top.plot(), width=zoom_val)
+            else: st.info("No threats identified.")
 
 # ==========================================
 # 5. VIDEO TRACKING
 # ==========================================
 with tabs[4]:
-    st.header("Video Tracking Mode")
-    mode = st.radio("Track Target:", ["Bees", "Pests"], horizontal=True)
-    v_file = st.file_uploader("Upload Hive Video", type=['mp4','mov','avi'], key="up_video")
-    
+    st.header("Video Tracking")
+    mode = st.radio("Target:", ["Bees", "Pests"], horizontal=True)
+    v_file = st.file_uploader("Upload Video", type=['mp4','mov','avi'])
     if v_file:
-        if st.button("🎥 Start Tracking Process"):
+        if st.button("🎥 Start Tracking"):
             model = bee_model if mode == "Bees" else enemy_model
-            
             t_in = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
             t_in.write(v_file.read())
-            
             cap = cv2.VideoCapture(t_in.name)
             w, h, fps = int(cap.get(3)), int(cap.get(4)), int(cap.get(5))
-            
             t_out = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-            out_writer = cv2.VideoWriter(t_out.name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-            
+            out = cv2.VideoWriter(t_out.name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
             vid_holder = st.empty()
-            unique_ids = set()
-            
+            u_ids = set()
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret: break
-                
-                # Run tracking
                 res = model.track(frame, persist=True, conf=0.20, verbose=False)[0]
-                
-                # Generic label for tracking output
                 res.names = {i: mode[:-1] for i in range(len(res.names))}
-                
-                if res.boxes.id is not None:
-                    unique_ids.update(res.boxes.id.cpu().numpy().astype(int))
-                
+                if res.boxes.id is not None: u_ids.update(res.boxes.id.cpu().numpy().astype(int))
                 f_plot = res.plot()
-                cv2.putText(f_plot, f"Total Unique {mode}: {len(unique_ids)}", (40, 50), 1, 2, (255,255,255), 2)
-                
-                out_writer.write(f_plot)
+                cv2.putText(f_plot, f"Total Unique: {len(u_ids)}", (40, 50), 1, 2, (255,255,255), 2)
+                out.write(f_plot)
                 vid_holder.image(cv2.cvtColor(f_plot, cv2.COLOR_BGR2RGB), use_container_width=True)
-                
-            cap.release()
-            out_writer.release()
-            
-            st.success(f"Tracking Summary: Found {len(unique_ids)} unique {mode}.")
-            with open(t_out.name, 'rb') as f_vid:
-                st.download_button("📥 Download Tracking Video", f_vid, "hive_tracking.mp4")
+            cap.release(); out.release()
+            st.success(f"Found {len(u_ids)} unique {mode}.")
+            with open(t_out.name, 'rb') as f_v: st.download_button("📥 Download", f_v, "tracking.mp4")

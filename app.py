@@ -138,13 +138,12 @@ st.title("🐝 Hive Health & Security Monitor")
 tabs = st.tabs(["🔍 Bee Detector", "🧬 Bee Species ID", "🛡️ Pest Detector", "🦠 Pest Species ID", "🎥 Video Tracking"])
 
 # ==========================================
-# 1. BEE DETECTOR (With Parallel Pest Scan)
+# 1. BEE DETECTOR 
 # ==========================================
 with tabs[0]:
     st.header("Bee & Parallel Scan Detector")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up1")
     
-    # Toggle to view Bees and Enemies Parallelly
     parallel_scan = st.checkbox("🔍 Parallel Scan: Overlay Pest Detection too!", value=False)
     
     if file:
@@ -154,19 +153,16 @@ with tabs[0]:
         if st.button("🚀 Run Detection", key="btn1"):
             img_cv = np.array(img)
             
-            # Run Bee Detection with Sidebar Confidence
             results_bee = bee_model(img, conf=conf_val, verbose=False)[0]
             results_bee.names = {i: "Bee" for i in range(len(results_bee.names))}
             ann_img = results_bee.plot(img=img_cv.copy(), line_width=1, font_size=10)
             
             st.subheader(f"📊 Results: {len(results_bee.boxes)} Bees Found")
             
-            # Parallel scan logic (Pests securely locked to 0.65)
             if parallel_scan:
                 results_enemy = enemy_model(img, conf=0.65, verbose=False)[0]
                 results_enemy.names = {i: "Pest" for i in range(len(results_enemy.names))}
                 
-                # Plot Enemy on the SAME image overlay
                 ann_img = results_enemy.plot(img=ann_img, line_width=1, font_size=10)
                 pest_count = len(results_enemy.boxes)
                 
@@ -203,7 +199,7 @@ with tabs[1]:
                 st.warning("No bees detected for identification at this confidence level.")
 
 # ==========================================
-# 3. PEST DETECTOR (Forced to 0.65 Threshold)
+# 3. PEST DETECTOR 
 # ==========================================
 with tabs[2]:
     st.header("Bee Enemy Detector")
@@ -214,7 +210,6 @@ with tabs[2]:
         
         if st.button("🛡️ Run Security Scan", key="btn3"):
             img_cv = np.array(img)
-            # Locked confidently at 0.65
             results = enemy_model(img, conf=0.65, verbose=False)[0]
             results.names = {i: "Pest" for i in range(len(results.names))}
             
@@ -229,7 +224,7 @@ with tabs[2]:
             st.download_button("📥 Download", get_image_download(ann_img), "pest_detection.jpg")
 
 # ==========================================
-# 4. PEST SPECIES ID (Forced to 0.65 Threshold)
+# 4. PEST SPECIES ID 
 # ==========================================
 with tabs[3]:
     st.header("Pest Species Identification")
@@ -239,7 +234,6 @@ with tabs[3]:
         st.image(img, width=zoom_val)
         
         if st.button("🦠 Identify Primary Pest", key="btn4"):
-            # Locked confidently at 0.65
             results = enemy_model(img, conf=0.65, verbose=False)[0]
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
@@ -250,7 +244,7 @@ with tabs[3]:
                 st.info("No threats identified.")
 
 # ==========================================
-# 5. VIDEO TRACKING (Offline Native Speed Processing)
+# 5. VIDEO TRACKING (High Speed Optimization)
 # ==========================================
 with tabs[4]:
     st.header("Video Tracking")
@@ -260,7 +254,6 @@ with tabs[4]:
     if v_file:
         if st.button("🎥 Start Tracking"):
             
-            # Use sidebar slider for bees, strictly use 0.65 for pests
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
             
@@ -268,54 +261,65 @@ with tabs[4]:
             t_in.write(v_file.read())
             cap = cv2.VideoCapture(t_in.name)
             
-            w, h = int(cap.get(3)), int(cap.get(4))
+            # --- SPEED OPTIMIZATION LOGIC ---
+            w_orig = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h_orig = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)
             if fps == 0 or np.isnan(fps): fps = 30 
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            
+            # Limit maximum processing width to 640px to dramatically speed up YOLO CPU processing
+            max_resolution = 640
+            if max(w_orig, h_orig) > max_resolution:
+                scale = max_resolution / float(max(w_orig, h_orig))
+                w_out, h_out = int(w_orig * scale), int(h_orig * scale)
+            else:
+                w_out, h_out = w_orig, h_orig
 
             t_out = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-            out = cv2.VideoWriter(t_out.name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+            out = cv2.VideoWriter(t_out.name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w_out, h_out))
             
             u_ids = set()
             frame_count = 0
             
-            # Progress bar added so it doesn't try to render every frame dynamically (which caused lag)
-            progress_bar = st.progress(0, text="Processing tracking video. Please wait...")
+            progress_bar = st.progress(0, text="Processing tracking video quickly. Please wait...")
             
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret: break
                 frame_count += 1
                 
-                res = model.track(frame, persist=True, conf=track_conf, verbose=False)[0]
+                # Resize the frame down before giving it to YOLO model
+                if (w_out, h_out) != (w_orig, h_orig):
+                    frame = cv2.resize(frame, (w_out, h_out))
+                
+                # Use "bytetrack.yaml" - a much lighter tracker logic for CPU, forcing imgsz limits
+                res = model.track(frame, persist=True, conf=track_conf, tracker="bytetrack.yaml", imgsz=max_resolution, verbose=False)[0]
                 res.names = {i: mode[:-1] for i in range(len(res.names))}
                 
                 if res.boxes.id is not None: 
                     u_ids.update(res.boxes.id.cpu().numpy().astype(int))
                 
                 f_plot = res.plot(line_width=1, font_size=10)
-                cv2.putText(f_plot, f"Total Unique: {len(u_ids)}", (40, 50), 1, 1.5, (255,255,255), 2)
+                cv2.putText(f_plot, f"Total Unique: {len(u_ids)}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
                 out.write(f_plot)
                 
-                if total_frames > 0:
+                if total_frames > 0 and frame_count % 5 == 0:  # Update UI slightly less often to save time
                     progress_bar.progress(min(frame_count / total_frames, 1.0), text=f"Processing Video... Frame {frame_count}/{total_frames}")
                     
             cap.release()
             out.release()
             progress_bar.empty()
             
-            # Displays the Total Number at once natively at the end
             st.success(f"🐝 Final Summary: {len(u_ids)} unique {mode} tracked successfully at once.")
             
-            # Convert video to web-safe H264 via ffmpeg to guarantee exact native playback speed in browser
             h264_path = t_out.name.replace('.mp4', '_h264.mp4')
-            exit_code = os.system(f"ffmpeg -y -i {t_out.name} -vcodec libx264 {h264_path} > /dev/null 2>&1")
+            os.system(f"ffmpeg -y -i {t_out.name} -vcodec libx264 {h264_path} > /dev/null 2>&1")
             final_path = h264_path if os.path.exists(h264_path) else t_out.name
             
             with open(final_path, 'rb') as f_v: 
                 video_bytes = f_v.read()
             
-            # Use HTML injection to map Image Scale (zoom_val) perfectly to the video width!
             b64 = base64.b64encode(video_bytes).decode()
             st.markdown(f'''
                 <div style="display:flex; justify-content:center; margin-bottom: 20px;">

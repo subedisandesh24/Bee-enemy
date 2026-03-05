@@ -11,6 +11,7 @@ import streamlit.components.v1 as components
 import tempfile
 import io
 import time
+import base64
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Bee & Pest Health Monitor", layout="wide", page_icon="🐝")
@@ -20,9 +21,8 @@ st.sidebar.header("🖼️ Display Settings")
 zoom_val = st.sidebar.slider("Image Scale (Zoom)", min_value=300, max_value=2000, value=800)
 
 st.sidebar.header("🎛️ Detection Settings")
-# Applied only to Bee detection
-conf_val = st.sidebar.slider("Bee Confidence Threshold", min_value=0.20, max_value=1.00, value=0.25, step=0.05)
-st.sidebar.info("💡 Confidence interval applies only to Bee detection in Picture Mode. Pest detection is locked at an optimal 0.20.")
+# Minimum adjusted to 0.1 as requested. Under the hood, this applies strictly to Bees. Pests are forced to 0.65.
+conf_val = st.sidebar.slider("Confidence Threshold", min_value=0.10, max_value=1.00, value=0.25, step=0.05)
 
 # --- CUSTOM CSS ---
 st.markdown("""
@@ -138,7 +138,7 @@ st.title("🐝 Hive Health & Security Monitor")
 tabs = st.tabs(["🔍 Bee Detector", "🧬 Bee Species ID", "🛡️ Pest Detector", "🦠 Pest Species ID", "🎥 Video Tracking"])
 
 # ==========================================
-# 1. BEE DETECTOR (With Parallel Pest Scan & New Setting)
+# 1. BEE DETECTOR (With Parallel Pest Scan)
 # ==========================================
 with tabs[0]:
     st.header("Bee & Parallel Scan Detector")
@@ -159,11 +159,11 @@ with tabs[0]:
             results_bee.names = {i: "Bee" for i in range(len(results_bee.names))}
             ann_img = results_bee.plot(img=img_cv.copy(), line_width=1, font_size=10)
             
-            st.subheader(f"📊 Results: {len(results_bee.boxes)} Bees Found (Confidence: {conf_val})")
+            st.subheader(f"📊 Results: {len(results_bee.boxes)} Bees Found")
             
-            # Parallel scan logic (Pests remain locked to 0.20 as requested)
+            # Parallel scan logic (Pests securely locked to 0.65)
             if parallel_scan:
-                results_enemy = enemy_model(img, conf=0.20, verbose=False)[0]
+                results_enemy = enemy_model(img, conf=0.65, verbose=False)[0]
                 results_enemy.names = {i: "Pest" for i in range(len(results_enemy.names))}
                 
                 # Plot Enemy on the SAME image overlay
@@ -179,7 +179,7 @@ with tabs[0]:
             st.download_button("📥 Download Result", get_image_download(ann_img), "parallel_detection.jpg")
 
 # ==========================================
-# 2. BEE SPECIES ID (No Bounding Box shown & New Setting)
+# 2. BEE SPECIES ID 
 # ==========================================
 with tabs[1]:
     st.header("Bee Species Identification")
@@ -197,14 +197,13 @@ with tabs[1]:
                 
                 st.success(f"### Detected Species: {species_name} (Confidence: {top.boxes.conf[0]:.2f})")
                 
-                # Display Species Data without bounding box rendering
                 profile_html = BEE_PROFILES.get(species_name, "Species details coming soon.")
                 st.markdown(profile_html, unsafe_allow_html=True)
             else: 
                 st.warning("No bees detected for identification at this confidence level.")
 
 # ==========================================
-# 3. PEST DETECTOR (Exact Setting from user request)
+# 3. PEST DETECTOR (Forced to 0.65 Threshold)
 # ==========================================
 with tabs[2]:
     st.header("Bee Enemy Detector")
@@ -215,7 +214,8 @@ with tabs[2]:
         
         if st.button("🛡️ Run Security Scan", key="btn3"):
             img_cv = np.array(img)
-            results = enemy_model(img, conf=0.40, verbose=False)[0]
+            # Locked confidently at 0.65
+            results = enemy_model(img, conf=0.65, verbose=False)[0]
             results.names = {i: "Pest" for i in range(len(results.names))}
             
             ann_img = results.plot(img=img_cv.copy(), line_width=1, font_size=10)
@@ -229,7 +229,7 @@ with tabs[2]:
             st.download_button("📥 Download", get_image_download(ann_img), "pest_detection.jpg")
 
 # ==========================================
-# 4. PEST SPECIES ID (Highest Conf - Exact Setting from user request)
+# 4. PEST SPECIES ID (Forced to 0.65 Threshold)
 # ==========================================
 with tabs[3]:
     st.header("Pest Species Identification")
@@ -239,7 +239,8 @@ with tabs[3]:
         st.image(img, width=zoom_val)
         
         if st.button("🦠 Identify Primary Pest", key="btn4"):
-            results = enemy_model(img, conf=0.40, verbose=False)[0]
+            # Locked confidently at 0.65
+            results = enemy_model(img, conf=0.65, verbose=False)[0]
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
                 top = results[int(best_idx)]
@@ -249,39 +250,44 @@ with tabs[3]:
                 st.info("No threats identified.")
 
 # ==========================================
-# 5. VIDEO TRACKING (New Setting)
+# 5. VIDEO TRACKING (Offline Native Speed Processing)
 # ==========================================
 with tabs[4]:
     st.header("Video Tracking")
     mode = st.radio("Target:",["Bees", "Pests"], horizontal=True)
     v_file = st.file_uploader("Upload Video", type=['mp4','mov','avi'])
+    
     if v_file:
         if st.button("🎥 Start Tracking"):
+            
+            # Use sidebar slider for bees, strictly use 0.65 for pests
+            track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
+            
             t_in = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
             t_in.write(v_file.read())
             cap = cv2.VideoCapture(t_in.name)
             
             w, h = int(cap.get(3)), int(cap.get(4))
             fps = cap.get(cv2.CAP_PROP_FPS)
-            if fps == 0 or np.isnan(fps): fps = 30 # Fallback 
-            
-            # Calculate sleep delay to maintain original video speed
-            frame_delay = 1.0 / fps 
+            if fps == 0 or np.isnan(fps): fps = 30 
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
             t_out = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
             out = cv2.VideoWriter(t_out.name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
             
-            vid_holder = st.empty()
             u_ids = set()
+            frame_count = 0
+            
+            # Progress bar added so it doesn't try to render every frame dynamically (which caused lag)
+            progress_bar = st.progress(0, text="Processing tracking video. Please wait...")
             
             while cap.isOpened():
-                start_time = time.time()
                 ret, frame = cap.read()
                 if not ret: break
+                frame_count += 1
                 
-                # Video confidence remains fixed at 0.20
-                res = model.track(frame, persist=True, conf=0.20, verbose=False)[0]
+                res = model.track(frame, persist=True, conf=track_conf, verbose=False)[0]
                 res.names = {i: mode[:-1] for i in range(len(res.names))}
                 
                 if res.boxes.id is not None: 
@@ -289,30 +295,42 @@ with tabs[4]:
                 
                 f_plot = res.plot(line_width=1, font_size=10)
                 cv2.putText(f_plot, f"Total Unique: {len(u_ids)}", (40, 50), 1, 1.5, (255,255,255), 2)
-                
                 out.write(f_plot)
                 
-                # Use Image scale / zoom value dynamically for video
-                vid_holder.image(cv2.cvtColor(f_plot, cv2.COLOR_BGR2RGB), width=zoom_val)
-                
-                # Check how much time it took to process the frame and sleep to maintain speed
-                elapsed_time = time.time() - start_time
-                if elapsed_time < frame_delay:
-                    time.sleep(frame_delay - elapsed_time)
+                if total_frames > 0:
+                    progress_bar.progress(min(frame_count / total_frames, 1.0), text=f"Processing Video... Frame {frame_count}/{total_frames}")
                     
             cap.release()
             out.release()
+            progress_bar.empty()
             
-            st.success(f"Summary: {len(u_ids)} unique {mode} tracked.")
+            # Displays the Total Number at once natively at the end
+            st.success(f"🐝 Final Summary: {len(u_ids)} unique {mode} tracked successfully at once.")
             
-            # Easily downloadable Video
-            with open(t_out.name, 'rb') as f_v: 
-                st.download_button(
-                    label="📥 Download Tracked Video", 
-                    data=f_v, 
-                    file_name=f"tracked_{mode.lower()}.mp4", 
-                    mime="video/mp4"
-                )
+            # Convert video to web-safe H264 via ffmpeg to guarantee exact native playback speed in browser
+            h264_path = t_out.name.replace('.mp4', '_h264.mp4')
+            exit_code = os.system(f"ffmpeg -y -i {t_out.name} -vcodec libx264 {h264_path} > /dev/null 2>&1")
+            final_path = h264_path if os.path.exists(h264_path) else t_out.name
+            
+            with open(final_path, 'rb') as f_v: 
+                video_bytes = f_v.read()
+            
+            # Use HTML injection to map Image Scale (zoom_val) perfectly to the video width!
+            b64 = base64.b64encode(video_bytes).decode()
+            st.markdown(f'''
+                <div style="display:flex; justify-content:center; margin-bottom: 20px;">
+                    <video width="{zoom_val}" controls autoplay loop>
+                        <source src="data:video/mp4;base64,{b64}" type="video/mp4">
+                    </video>
+                </div>
+            ''', unsafe_allow_html=True)
+            
+            st.download_button(
+                label="📥 Download Tracked Video", 
+                data=video_bytes, 
+                file_name=f"tracked_{mode.lower()}.mp4", 
+                mime="video/mp4"
+            )
 
 # --- FOOTER ---
 st.markdown('<p class="footer">Developed by - Sandesh Subedi</p>', unsafe_allow_html=True)

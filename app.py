@@ -137,13 +137,11 @@ st.title("🐝 Hive Health & Security Monitor")
 tabs = st.tabs(["🔍 Bee Detector", "🧬 Bee Species ID", "🛡️ Pest Detector", "🦠 Pest Species ID", "🎥 Video Tracking"])
 
 # ==========================================
-# 1. BEE DETECTOR 
+# 1. BEE DETECTOR (Standalone)
 # ==========================================
 with tabs[0]:
-    st.header("Bee & Parallel Scan Detector")
+    st.header("Bee Detector")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up1")
-    
-    parallel_scan = st.checkbox("🔍 Parallel Scan: Overlay Pest Detection too!", value=False)
     
     if file:
         img = process_image_memory_safe(file)
@@ -158,20 +156,8 @@ with tabs[0]:
             
             st.subheader(f"📊 Results: {len(results_bee.boxes)} Bees Found")
             
-            if parallel_scan:
-                results_enemy = enemy_model(img, conf=0.65, verbose=False)[0]
-                results_enemy.names = {i: "Pest" for i in range(len(results_enemy.names))}
-                
-                ann_img = results_enemy.plot(img=ann_img, line_width=1, font_size=10)
-                pest_count = len(results_enemy.boxes)
-                
-                st.subheader(f"🛡️ Parallel Results: {pest_count} Pests Found")
-                if pest_count > 0:
-                    st.error("🚨 ALERT: Invasion Activity Detected Parallelly!")
-                    trigger_vibration()
-
             st.image(ann_img, width=zoom_val)
-            st.download_button("📥 Download Result", get_image_download(ann_img), "parallel_detection.jpg")
+            st.download_button("📥 Download Result", get_image_download(ann_img), "bee_detection.jpg")
 
 # ==========================================
 # 2. BEE SPECIES ID 

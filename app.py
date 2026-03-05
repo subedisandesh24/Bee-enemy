@@ -10,7 +10,6 @@ from PIL import Image
 import streamlit.components.v1 as components
 import tempfile
 import io
-import time
 import base64
 
 # --- PAGE CONFIG ---
@@ -21,7 +20,7 @@ st.sidebar.header("🖼️ Display Settings")
 zoom_val = st.sidebar.slider("Image Scale (Zoom)", min_value=300, max_value=2000, value=800)
 
 st.sidebar.header("🎛️ Detection Settings")
-# Minimum adjusted to 0.1 as requested. Under the hood, this applies strictly to Bees. Pests are forced to 0.65.
+# Minimum adjusted to 0.10 as requested. Under the hood, this applies strictly to Bees. Pests are forced to 0.65.
 conf_val = st.sidebar.slider("Confidence Threshold", min_value=0.10, max_value=1.00, value=0.25, step=0.05)
 
 # --- CUSTOM CSS ---
@@ -244,7 +243,7 @@ with tabs[3]:
                 st.info("No threats identified.")
 
 # ==========================================
-# 5. VIDEO TRACKING (High Speed Optimization)
+# 5. VIDEO TRACKING (High Speed Optimization & Simple Counting)
 # ==========================================
 with tabs[4]:
     st.header("Video Tracking")
@@ -279,10 +278,10 @@ with tabs[4]:
             t_out = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
             out = cv2.VideoWriter(t_out.name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w_out, h_out))
             
-            u_ids = set()
             frame_count = 0
+            max_detected = 0  # To track the maximum number detected at once
             
-            progress_bar = st.progress(0, text="Processing tracking video quickly. Please wait...")
+            progress_bar = st.progress(0, text="Processing video. Please wait...")
             
             while cap.isOpened():
                 ret, frame = cap.read()
@@ -293,15 +292,19 @@ with tabs[4]:
                 if (w_out, h_out) != (w_orig, h_orig):
                     frame = cv2.resize(frame, (w_out, h_out))
                 
-                # Use "bytetrack.yaml" - a much lighter tracker logic for CPU, forcing imgsz limits
-                res = model.track(frame, persist=True, conf=track_conf, tracker="bytetrack.yaml", imgsz=max_resolution, verbose=False)[0]
+                # Standard prediction used (No unique IDs needed, saves a lot of processing time!)
+                res = model(frame, conf=track_conf, imgsz=max_resolution, verbose=False)[0]
                 res.names = {i: mode[:-1] for i in range(len(res.names))}
                 
-                if res.boxes.id is not None: 
-                    u_ids.update(res.boxes.id.cpu().numpy().astype(int))
+                # Count current frame's detections
+                current_count = len(res.boxes)
+                if current_count > max_detected:
+                    max_detected = current_count
                 
                 f_plot = res.plot(line_width=1, font_size=10)
-                cv2.putText(f_plot, f"Total Unique: {len(u_ids)}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+                
+                # Place Total Detections text on the frame
+                cv2.putText(f_plot, f"Total {mode}: {current_count}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
                 out.write(f_plot)
                 
                 if total_frames > 0 and frame_count % 5 == 0:  # Update UI slightly less often to save time
@@ -311,7 +314,8 @@ with tabs[4]:
             out.release()
             progress_bar.empty()
             
-            st.success(f"🐝 Final Summary: {len(u_ids)} unique {mode} tracked successfully at once.")
+            # Final Success Summary indicating the highest number detected at once
+            st.success(f"🐝 Final Summary: Maximum {max_detected} {mode} detected at once in the video.")
             
             h264_path = t_out.name.replace('.mp4', '_h264.mp4')
             os.system(f"ffmpeg -y -i {t_out.name} -vcodec libx264 {h264_path} > /dev/null 2>&1")

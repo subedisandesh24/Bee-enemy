@@ -20,18 +20,18 @@ st.sidebar.header("🖼️ Display Settings")
 zoom_val = st.sidebar.slider("Image Scale (Zoom)", min_value=300, max_value=2000, value=800)
 
 st.sidebar.header("🎛️ Detection Settings")
-# Minimum value updated to 0.2
-conf_val = st.sidebar.slider("Confidence Threshold", min_value=0.20, max_value=1.00, value=0.25, step=0.05)
-st.sidebar.info("💡 Confidence interval applies parallelly to both Bee and Enemy detections in Picture Mode.")
+# Applied only to Bee detection
+conf_val = st.sidebar.slider("Bee Confidence Threshold", min_value=0.20, max_value=1.00, value=0.25, step=0.05)
+st.sidebar.info("💡 Confidence interval applies only to Bee detection in Picture Mode. Pest detection is locked at an optimal 0.20.")
 
 # --- CUSTOM CSS ---
 st.markdown("""
 <style>
     .stTabs[data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] {
+    .stTabs[data-baseweb="tab"] {
         background-color: #f0f2f6; border-radius: 10px; padding: 8px 20px; font-weight: bold;
     }
-    .stTabs [aria-selected="true"] { background-color: #ffc107 !important; color: black !important; }
+    .stTabs[aria-selected="true"] { background-color: #ffc107 !important; color: black !important; }
     .stButton>button { 
         width: 100%; border-radius: 10px; font-weight: bold; height: 3.5em; 
         background-color: #ffc107; color: black; border: 2px solid #b38600; 
@@ -138,7 +138,7 @@ st.title("🐝 Hive Health & Security Monitor")
 tabs = st.tabs(["🔍 Bee Detector", "🧬 Bee Species ID", "🛡️ Pest Detector", "🦠 Pest Species ID", "🎥 Video Tracking"])
 
 # ==========================================
-# 1. BEE DETECTOR (With Parallel Pest Scan)
+# 1. BEE DETECTOR (With Parallel Pest Scan & New Setting)
 # ==========================================
 with tabs[0]:
     st.header("Bee & Parallel Scan Detector")
@@ -161,9 +161,9 @@ with tabs[0]:
             
             st.subheader(f"📊 Results: {len(results_bee.boxes)} Bees Found (Confidence: {conf_val})")
             
-            # Parallel scan logic
+            # Parallel scan logic (Pests remain locked to 0.20 as requested)
             if parallel_scan:
-                results_enemy = enemy_model(img, conf=conf_val, verbose=False)[0]
+                results_enemy = enemy_model(img, conf=0.20, verbose=False)[0]
                 results_enemy.names = {i: "Pest" for i in range(len(results_enemy.names))}
                 
                 # Plot Enemy on the SAME image overlay
@@ -179,7 +179,7 @@ with tabs[0]:
             st.download_button("📥 Download Result", get_image_download(ann_img), "parallel_detection.jpg")
 
 # ==========================================
-# 2. BEE SPECIES ID 
+# 2. BEE SPECIES ID (No Bounding Box shown & New Setting)
 # ==========================================
 with tabs[1]:
     st.header("Bee Species Identification")
@@ -195,16 +195,16 @@ with tabs[1]:
                 top = results[int(best_idx)]
                 species_name = top.names[int(top.boxes.cls[0])]
                 
-                st.success(f"### Detected Species: {species_name}")
-                st.image(top.plot(line_width=1, font_size=10), width=zoom_val)
+                st.success(f"### Detected Species: {species_name} (Confidence: {top.boxes.conf[0]:.2f})")
                 
+                # Display Species Data without bounding box rendering
                 profile_html = BEE_PROFILES.get(species_name, "Species details coming soon.")
                 st.markdown(profile_html, unsafe_allow_html=True)
             else: 
                 st.warning("No bees detected for identification at this confidence level.")
 
 # ==========================================
-# 3. PEST DETECTOR
+# 3. PEST DETECTOR (Exact Setting from user request)
 # ==========================================
 with tabs[2]:
     st.header("Bee Enemy Detector")
@@ -215,12 +215,12 @@ with tabs[2]:
         
         if st.button("🛡️ Run Security Scan", key="btn3"):
             img_cv = np.array(img)
-            results = enemy_model(img, conf=conf_val, verbose=False)[0]
+            results = enemy_model(img, conf=0.20, verbose=False)[0]
             results.names = {i: "Pest" for i in range(len(results.names))}
             
             ann_img = results.plot(img=img_cv.copy(), line_width=1, font_size=10)
             count = len(results.boxes)
-            st.subheader(f"📊 Results: {count} Pests Found (Confidence: {conf_val})")
+            st.subheader(f"📊 Results: {count} Pests Found")
             
             if count > 3:
                 st.error("🚨 ALERT: Invasion Activity!")
@@ -229,7 +229,7 @@ with tabs[2]:
             st.download_button("📥 Download", get_image_download(ann_img), "pest_detection.jpg")
 
 # ==========================================
-# 4. PEST SPECIES ID 
+# 4. PEST SPECIES ID (Highest Conf - Exact Setting from user request)
 # ==========================================
 with tabs[3]:
     st.header("Pest Species Identification")
@@ -239,21 +239,21 @@ with tabs[3]:
         st.image(img, width=zoom_val)
         
         if st.button("🦠 Identify Primary Pest", key="btn4"):
-            results = enemy_model(img, conf=conf_val, verbose=False)[0]
+            results = enemy_model(img, conf=0.20, verbose=False)[0]
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
                 top = results[int(best_idx)]
                 st.warning(f"### Detected Threat: {top.names[int(top.boxes.cls[0])]} (Conf: {top.boxes.conf[0]:.2f})")
                 st.image(top.plot(line_width=1, font_size=10), width=zoom_val)
             else: 
-                st.info("No threats identified at this confidence level.")
+                st.info("No threats identified.")
 
 # ==========================================
-# 5. VIDEO TRACKING
+# 5. VIDEO TRACKING (New Setting)
 # ==========================================
 with tabs[4]:
     st.header("Video Tracking")
-    mode = st.radio("Target:", ["Bees", "Pests"], horizontal=True)
+    mode = st.radio("Target:",["Bees", "Pests"], horizontal=True)
     v_file = st.file_uploader("Upload Video", type=['mp4','mov','avi'])
     if v_file:
         if st.button("🎥 Start Tracking"):
@@ -280,7 +280,7 @@ with tabs[4]:
                 ret, frame = cap.read()
                 if not ret: break
                 
-                # Video confidence remains fixed at 0.20 as requested (slider only applies to picture mode)
+                # Video confidence remains fixed at 0.20
                 res = model.track(frame, persist=True, conf=0.20, verbose=False)[0]
                 res.names = {i: mode[:-1] for i in range(len(res.names))}
                 

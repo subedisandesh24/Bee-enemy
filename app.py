@@ -243,7 +243,7 @@ with tabs[3]:
                 st.info("No threats identified.")
 
 # ==========================================
-# 5. VIDEO TRACKING (High Speed Optimization & Simple Counting)
+# 5. VIDEO TRACKING (High Speed Optimization & Cumulative Sum)
 # ==========================================
 with tabs[4]:
     st.header("Video Tracking")
@@ -279,7 +279,7 @@ with tabs[4]:
             out = cv2.VideoWriter(t_out.name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w_out, h_out))
             
             frame_count = 0
-            max_detected = 0  # To track the maximum number detected at once
+            total_sum = 0  # To track the cumulative sum of detections across all frames
             
             progress_bar = st.progress(0, text="Processing video. Please wait...")
             
@@ -296,15 +296,14 @@ with tabs[4]:
                 res = model(frame, conf=track_conf, imgsz=max_resolution, verbose=False)[0]
                 res.names = {i: mode[:-1] for i in range(len(res.names))}
                 
-                # Count current frame's detections
+                # Add current frame's detections to the total sum
                 current_count = len(res.boxes)
-                if current_count > max_detected:
-                    max_detected = current_count
+                total_sum += current_count
                 
                 f_plot = res.plot(line_width=1, font_size=10)
                 
-                # Place Total Detections text on the frame
-                cv2.putText(f_plot, f"Total {mode}: {current_count}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+                # Place Cumulative Detections text on the frame
+                cv2.putText(f_plot, f"Total Sum of {mode}: {total_sum}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
                 out.write(f_plot)
                 
                 if total_frames > 0 and frame_count % 5 == 0:  # Update UI slightly less often to save time
@@ -314,8 +313,8 @@ with tabs[4]:
             out.release()
             progress_bar.empty()
             
-            # Final Success Summary indicating the highest number detected at once
-            st.success(f"🐝 Final Summary: Maximum {max_detected} {mode} detected at once in the video.")
+            # Final Success Summary indicating the total accumulated sum
+            st.success(f"🐝 Final Summary: A total sum of {total_sum} {mode} detections were recorded across the entire video.")
             
             h264_path = t_out.name.replace('.mp4', '_h264.mp4')
             os.system(f"ffmpeg -y -i {t_out.name} -vcodec libx264 {h264_path} > /dev/null 2>&1")

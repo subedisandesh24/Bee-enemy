@@ -215,7 +215,7 @@ with tabs[2]:
         
         if st.button("🛡️ Run Security Scan", key="btn3"):
             img_cv = np.array(img)
-            results = enemy_model(img, conf=0.20, verbose=False)[0]
+            results = enemy_model(img, conf=0.40, verbose=False)[0]
             results.names = {i: "Pest" for i in range(len(results.names))}
             
             ann_img = results.plot(img=img_cv.copy(), line_width=1, font_size=10)
@@ -239,7 +239,7 @@ with tabs[3]:
         st.image(img, width=zoom_val)
         
         if st.button("🦠 Identify Primary Pest", key="btn4"):
-            results = enemy_model(img, conf=0.20, verbose=False)[0]
+            results = enemy_model(img, conf=0.40, verbose=False)[0]
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
                 top = results[int(best_idx)]

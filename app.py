@@ -1,6 +1,7 @@
 import os
-# Fix for Streamlit Cloud settings warning
+# Fix for Streamlit Cloud settings warning and concurrency
 os.environ['YOLO_CONFIG_DIR'] = '/tmp'
+os.environ['STREAMLIT_SERVER_MAX_MESSAGE_SIZE'] = '200'
 
 import streamlit as st
 import cv2
@@ -11,6 +12,8 @@ import streamlit.components.v1 as components
 import tempfile
 import io
 import base64
+import time
+import gc
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Bee & Pest Health Monitor", layout="wide", page_icon="🐝")
@@ -20,7 +23,6 @@ st.sidebar.header("🖼️ Display Settings")
 zoom_val = st.sidebar.slider("Image Scale (Zoom)", min_value=300, max_value=2000, value=800)
 
 st.sidebar.header("🎛️ Detection Settings")
-# Minimum adjusted to 0.10 as requested. Under the hood, this applies strictly to Bees. Pests are forced to 0.65.
 conf_val = st.sidebar.slider("Confidence Threshold", min_value=0.10, max_value=1.00, value=0.25, step=0.05)
 
 # --- CUSTOM CSS ---
@@ -158,6 +160,10 @@ with tabs[0]:
             
             st.image(ann_img, width=zoom_val)
             st.download_button("📥 Download Result", get_image_download(ann_img), "bee_detection.jpg")
+            
+            # RAM Cleanup
+            del img, img_cv, results_bee, ann_img
+            gc.collect()
 
 # ==========================================
 # 2. BEE SPECIES ID 
@@ -182,6 +188,10 @@ with tabs[1]:
                 st.markdown(profile_html, unsafe_allow_html=True)
             else: 
                 st.warning("No bees detected for identification at this confidence level.")
+            
+            # RAM Cleanup
+            del img, results
+            gc.collect()
 
 # ==========================================
 # 3. PEST DETECTOR 
@@ -207,6 +217,10 @@ with tabs[2]:
                 trigger_vibration()
             st.image(ann_img, width=zoom_val)
             st.download_button("📥 Download", get_image_download(ann_img), "pest_detection.jpg")
+            
+            # RAM Cleanup
+            del img, img_cv, results, ann_img
+            gc.collect()
 
 # ==========================================
 # 4. PEST SPECIES ID 
@@ -227,9 +241,13 @@ with tabs[3]:
                 st.image(top.plot(line_width=1, font_size=10), width=zoom_val)
             else: 
                 st.info("No threats identified.")
+                
+            # RAM Cleanup
+            del img, results
+            gc.collect()
 
 # ==========================================
-# 5. VIDEO TRACKING (High Speed Optimization & Cumulative Sum)
+# 5. VIDEO TRACKING (Multi-User Safe & Optimized)
 # ==========================================
 with tabs[4]:
     st.header("Video Tracking")
@@ -242,88 +260,110 @@ with tabs[4]:
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
             
-            t_in = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-            t_in.write(v_file.read())
-            cap = cv2.VideoCapture(t_in.name)
+            # File references for failsafe cleanup
+            t_in_path = None
+            t_out_path = None
+            h264_path = None
             
-            # --- SPEED OPTIMIZATION LOGIC ---
-            w_orig = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            h_orig = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            if fps == 0 or np.isnan(fps): fps = 30 
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            
-            # Limit maximum processing width to 640px to dramatically speed up YOLO CPU processing
-            max_resolution = 640
-            if max(w_orig, h_orig) > max_resolution:
-                scale = max_resolution / float(max(w_orig, h_orig))
-                w_out, h_out = int(w_orig * scale), int(h_orig * scale)
-            else:
-                w_out, h_out = w_orig, h_orig
+            try:
+                # 1. Create secure temp input
+                t_in = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                t_in_path = t_in.name
+                t_in.write(v_file.read())
+                t_in.close()
+                
+                cap = cv2.VideoCapture(t_in_path)
+                
+                w_orig = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                h_orig = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                if fps == 0 or np.isnan(fps): fps = 30 
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                
+                # Dynamic Resize to save RAM
+                max_resolution = 640
+                if max(w_orig, h_orig) > max_resolution:
+                    scale = max_resolution / float(max(w_orig, h_orig))
+                    w_out, h_out = int(w_orig * scale), int(h_orig * scale)
+                else:
+                    w_out, h_out = w_orig, h_orig
 
-            t_out = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-            out = cv2.VideoWriter(t_out.name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w_out, h_out))
-            
-            frame_count = 0
-            total_sum = 0  # To track the cumulative sum of detections across all frames
-            
-            progress_bar = st.progress(0, text="Processing video. Please wait...")
-            
-            while cap.isOpened():
-                ret, frame = cap.read()
-                if not ret: break
-                frame_count += 1
+                # 2. Create secure temp output
+                t_out = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                t_out_path = t_out.name
+                t_out.close()
                 
-                # Resize the frame down before giving it to YOLO model
-                if (w_out, h_out) != (w_orig, h_orig):
-                    frame = cv2.resize(frame, (w_out, h_out))
+                out = cv2.VideoWriter(t_out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w_out, h_out))
                 
-                # Standard prediction used (No unique IDs needed, saves a lot of processing time!)
-                res = model(frame, conf=track_conf, imgsz=max_resolution, verbose=False)[0]
-                res.names = {i: mode[:-1] for i in range(len(res.names))}
+                frame_count = 0
+                total_sum = 0 
                 
-                # Add current frame's detections to the total sum
-                current_count = len(res.boxes)
-                total_sum += current_count
+                progress_bar = st.progress(0, text="Processing video for multiple users. Please wait...")
                 
-                f_plot = res.plot(line_width=1, font_size=10)
-                
-                # Place Cumulative Detections text on the frame
-                cv2.putText(f_plot, f"Total Sum of {mode}: {total_sum}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
-                out.write(f_plot)
-                
-                if total_frames > 0 and frame_count % 5 == 0:  # Update UI slightly less often to save time
-                    progress_bar.progress(min(frame_count / total_frames, 1.0), text=f"Processing Video... Frame {frame_count}/{total_frames}")
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret: break
+                    frame_count += 1
                     
-            cap.release()
-            out.release()
-            progress_bar.empty()
-            
-            # Final Success Summary indicating the total accumulated sum
-            st.success(f"🐝 Final Summary: A total sum of {total_sum} {mode} detections were recorded across the entire video.")
-            
-            h264_path = t_out.name.replace('.mp4', '_h264.mp4')
-            os.system(f"ffmpeg -y -i {t_out.name} -vcodec libx264 {h264_path} > /dev/null 2>&1")
-            final_path = h264_path if os.path.exists(h264_path) else t_out.name
-            
-            with open(final_path, 'rb') as f_v: 
-                video_bytes = f_v.read()
-            
-            b64 = base64.b64encode(video_bytes).decode()
-            st.markdown(f'''
-                <div style="display:flex; justify-content:center; margin-bottom: 20px;">
-                    <video width="{zoom_val}" controls autoplay loop>
-                        <source src="data:video/mp4;base64,{b64}" type="video/mp4">
-                    </video>
-                </div>
-            ''', unsafe_allow_html=True)
-            
-            st.download_button(
-                label="📥 Download Tracked Video", 
-                data=video_bytes, 
-                file_name=f"tracked_{mode.lower()}.mp4", 
-                mime="video/mp4"
-            )
+                    if (w_out, h_out) != (w_orig, h_orig):
+                        frame = cv2.resize(frame, (w_out, h_out))
+                    
+                    res = model(frame, conf=track_conf, imgsz=max_resolution, verbose=False)[0]
+                    res.names = {i: mode[:-1] for i in range(len(res.names))}
+                    
+                    current_count = len(res.boxes)
+                    total_sum += current_count
+                    
+                    f_plot = res.plot(line_width=1, font_size=10)
+                    cv2.putText(f_plot, f"Total Sum of {mode}: {total_sum}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+                    out.write(f_plot)
+                    
+                    # Yield the Global Interpreter Lock (GIL) so other 49 users don't disconnect!
+                    if frame_count % 5 == 0:
+                        time.sleep(0.01) 
+                        if total_frames > 0:
+                            progress_bar.progress(min(frame_count / total_frames, 1.0), text=f"Processing Video... Frame {frame_count}/{total_frames}")
+                        
+                cap.release()
+                out.release()
+                progress_bar.empty()
+                
+                st.success(f"🐝 Final Summary: A total sum of {total_sum} {mode} detections were recorded across the entire video.")
+                
+                # Convert to H264 for Streamlit browser rendering
+                h264_path = t_out_path.replace('.mp4', '_h264.mp4')
+                os.system(f"ffmpeg -y -i {t_out_path} -vcodec libx264 {h264_path} > /dev/null 2>&1")
+                
+                final_path = h264_path if os.path.exists(h264_path) else t_out_path
+                
+                with open(final_path, 'rb') as f_v: 
+                    video_bytes = f_v.read()
+                
+                b64 = base64.b64encode(video_bytes).decode()
+                st.markdown(f'''
+                    <div style="display:flex; justify-content:center; margin-bottom: 20px;">
+                        <video width="{zoom_val}" controls autoplay loop>
+                            <source src="data:video/mp4;base64,{b64}" type="video/mp4">
+                        </video>
+                    </div>
+                ''', unsafe_allow_html=True)
+                
+                st.download_button(
+                    label="📥 Download Tracked Video", 
+                    data=video_bytes, 
+                    file_name=f"tracked_{mode.lower()}.mp4", 
+                    mime="video/mp4"
+                )
+                
+            finally:
+                # 3. CRITICAL: Delete temp files IMMEDIATELY after rendering to prevent Disk crash!
+                if t_in_path and os.path.exists(t_in_path): os.remove(t_in_path)
+                if t_out_path and os.path.exists(t_out_path): os.remove(t_out_path)
+                if h264_path and os.path.exists(h264_path): os.remove(h264_path)
+                
+                # RAM Cleanup
+                del video_bytes, b64
+                gc.collect()
 
 # --- FOOTER ---
 st.markdown('<p class="footer">Developed by - Sandesh Subedi</p>', unsafe_allow_html=True)

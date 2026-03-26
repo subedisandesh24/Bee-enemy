@@ -1,7 +1,8 @@
 import os
 # Fix for Streamlit Cloud settings warning and concurrency
+# Set to 500MB explicitly for file uploads
 os.environ['YOLO_CONFIG_DIR'] = '/tmp'
-os.environ['STREAMLIT_SERVER_MAX_MESSAGE_SIZE'] = '200'
+os.environ['STREAMLIT_SERVER_MAX_MESSAGE_SIZE'] = '500m' 
 
 import streamlit as st
 import cv2
@@ -23,7 +24,11 @@ st.sidebar.header("🖼️ Display Settings")
 zoom_val = st.sidebar.slider("Image Scale (Zoom)", min_value=300, max_value=2000, value=800)
 
 st.sidebar.header("🎛️ Detection Settings")
+# Keep this as the default for now
 conf_val = st.sidebar.slider("Confidence Threshold", min_value=0.10, max_value=1.00, value=0.25, step=0.05)
+# Add a setting for lower confidence testing if needed later
+# pest_conf_val = st.sidebar.slider("Pest Confidence Threshold", min_value=0.50, max_value=1.00, value=0.65, step=0.05)
+
 
 # --- CUSTOM CSS ---
 st.markdown("""
@@ -43,8 +48,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- BEE SPECIES DATA ---
+# --- BEE SPECIES DATA (Kept as is) ---
 BEE_PROFILES = {
+    # ... (Your BEE_PROFILES dictionary remains here) ...
     "Apis laboriosa": """
         <div class="bee-info">
         <h3>🍯 <b>Apis laboriosa</b></h3>
@@ -107,22 +113,29 @@ BEE_PROFILES = {
     """
 }
 
+
 # --- HELPERS ---
 def trigger_vibration():
     components.html("<script>if('vibrate' in navigator){navigator.vibrate([500,200,500]);}</script>", height=0, width=0)
 
 @st.cache_resource
 def load_models():
+    # NOTE: Ensure your /models folder structure is correct relative to this script
     base_dir = os.path.dirname(os.path.abspath(__file__))
     b_path = os.path.join(base_dir, 'models', 'bee_best.pt')
     e_path = os.path.join(base_dir, 'models', 'enemy_best.pt')
+    
+    # Using a very small image size for model loading/initialization (will be overridden later)
     return YOLO(b_path), YOLO(e_path)
 
-def process_image_memory_safe(file):
+def process_image_memory_safe(file, max_inference_size=1024):
+    """Loads, converts, and resizes image for safe processing."""
     img = Image.open(file).convert("RGB")
-    max_size = 1024 
-    if max(img.size) > max_size:
-        img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+    
+    # Aggressively resize for low-confidence/memory-sensitive runs
+    if max(img.size) > max_inference_size:
+        img.thumbnail((max_inference_size, max_inference_size), Image.Resampling.LANCZOS)
+        
     return img
 
 def get_image_download(img_array):
@@ -146,14 +159,18 @@ with tabs[0]:
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up1")
     
     if file:
-        img = process_image_memory_safe(file)
+        # Use a slightly larger size for the main display/default run (0.25 conf)
+        img = process_image_memory_safe(file, max_inference_size=1024) 
         st.image(img, width=zoom_val)
         
         if st.button("🚀 Run Detection", key="btn1"):
             img_cv = np.array(img)
             
-            results_bee = bee_model(img, conf=conf_val, verbose=False)[0]
+            # Inference uses the current sidebar conf_val
+            results_bee = bee_model(img, conf=conf_val, imgsz=1024, verbose=False)[0]
             results_bee.names = {i: "Bee" for i in range(len(results_bee.names))}
+            
+            # Plotting creates the final output buffer
             ann_img = results_bee.plot(img=img_cv.copy(), line_width=1, font_size=10)
             
             st.subheader(f"📊 Results: {len(results_bee.boxes)} Bees Found")
@@ -172,11 +189,14 @@ with tabs[1]:
     st.header("Bee Species Identification")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up2")
     if file:
-        img = process_image_memory_safe(file)
+        # Use a slightly larger size for the main display/default run (0.25 conf)
+        img = process_image_memory_safe(file, max_inference_size=1024)
         st.image(img, width=zoom_val)
         
         if st.button("🧬 Identify Primary Species", key="btn2"):
-            results = bee_model(img, conf=conf_val, verbose=False)[0]
+            # Inference uses the current sidebar conf_val
+            results = bee_model(img, conf=conf_val, imgsz=1024, verbose=False)[0]
+            
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
                 top = results[int(best_idx)]
@@ -200,12 +220,14 @@ with tabs[2]:
     st.header("Bee Enemy Detector")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up3")
     if file:
-        img = process_image_memory_safe(file)
+        # PEST detection uses a higher fixed confidence (0.65)
+        img = process_image_memory_safe(file, max_inference_size=1024)
         st.image(img, width=zoom_val)
         
         if st.button("🛡️ Run Security Scan", key="btn3"):
             img_cv = np.array(img)
-            results = enemy_model(img, conf=0.65, verbose=False)[0]
+            # Pest model uses a fixed, higher confidence for better precision
+            results = enemy_model(img, conf=0.65, imgsz=1024, verbose=False)[0] 
             results.names = {i: "Pest" for i in range(len(results.names))}
             
             ann_img = results.plot(img=img_cv.copy(), line_width=1, font_size=10)
@@ -229,11 +251,12 @@ with tabs[3]:
     st.header("Pest Species Identification")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up4")
     if file:
-        img = process_image_memory_safe(file)
+        # Pest model uses a fixed, higher confidence for better precision
+        img = process_image_memory_safe(file, max_inference_size=1024)
         st.image(img, width=zoom_val)
         
         if st.button("🦠 Identify Primary Pest", key="btn4"):
-            results = enemy_model(img, conf=0.65, verbose=False)[0]
+            results = enemy_model(img, conf=0.65, imgsz=1024, verbose=False)[0]
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
                 top = results[int(best_idx)]
@@ -257,8 +280,12 @@ with tabs[4]:
     if v_file:
         if st.button("🎥 Start Tracking"):
             
+            # Set specific confidences for video tracking
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
+            
+            # Use a smaller size for video frames to save RAM during processing
+            VIDEO_FRAME_SIZE = 640 
             
             # File references for failsafe cleanup
             t_in_path = None
@@ -280,10 +307,9 @@ with tabs[4]:
                 if fps == 0 or np.isnan(fps): fps = 30 
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 
-                # Dynamic Resize to save RAM
-                max_resolution = 640
-                if max(w_orig, h_orig) > max_resolution:
-                    scale = max_resolution / float(max(w_orig, h_orig))
+                # Dynamic Resize based on VIDEO_FRAME_SIZE
+                if max(w_orig, h_orig) > VIDEO_FRAME_SIZE:
+                    scale = VIDEO_FRAME_SIZE / float(max(w_orig, h_orig))
                     w_out, h_out = int(w_orig * scale), int(h_orig * scale)
                 else:
                     w_out, h_out = w_orig, h_orig
@@ -305,10 +331,12 @@ with tabs[4]:
                     if not ret: break
                     frame_count += 1
                     
+                    # Resize frame ONLY IF necessary
                     if (w_out, h_out) != (w_orig, h_orig):
                         frame = cv2.resize(frame, (w_out, h_out))
                     
-                    res = model(frame, conf=track_conf, imgsz=max_resolution, verbose=False)[0]
+                    # Run model with the smaller frame size
+                    res = model(frame, conf=track_conf, imgsz=VIDEO_FRAME_SIZE, verbose=False)[0] 
                     res.names = {i: mode[:-1] for i in range(len(res.names))}
                     
                     current_count = len(res.boxes)
@@ -318,9 +346,9 @@ with tabs[4]:
                     cv2.putText(f_plot, f"Total Sum of {mode}: {total_sum}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
                     out.write(f_plot)
                     
-                    # Yield the Global Interpreter Lock (GIL) so other 49 users don't disconnect!
-                    if frame_count % 5 == 0:
-                        time.sleep(0.01) 
+                    # Yield the Global Interpreter Lock (GIL)
+                    if frame_count % 10 == 0: # Check less often to speed up processing
+                        time.sleep(0.001) 
                         if total_frames > 0:
                             progress_bar.progress(min(frame_count / total_frames, 1.0), text=f"Processing Video... Frame {frame_count}/{total_frames}")
                         
@@ -330,9 +358,10 @@ with tabs[4]:
                 
                 st.success(f"🐝 Final Summary: A total sum of {total_sum} {mode} detections were recorded across the entire video.")
                 
-                # Convert to H264 for Streamlit browser rendering
+                # Convert to H264 for Streamlit browser rendering (might be the bottleneck if large)
                 h264_path = t_out_path.replace('.mp4', '_h264.mp4')
-                os.system(f"ffmpeg -y -i {t_out_path} -vcodec libx264 {h264_path} > /dev/null 2>&1")
+                # Use a lower bitrate preset (-preset veryfast) for faster encoding time
+                os.system(f"ffmpeg -y -i {t_out_path} -vcodec libx264 -preset veryfast -crf 23 {h264_path} > /dev/null 2>&1")
                 
                 final_path = h264_path if os.path.exists(h264_path) else t_out_path
                 
@@ -362,8 +391,9 @@ with tabs[4]:
                 if h264_path and os.path.exists(h264_path): os.remove(h264_path)
                 
                 # RAM Cleanup
-                del video_bytes, b64
-                gc.collect()
+                # Explicitly call garbage collection multiple times in intensive blocks
+                gc.collect() 
+                gc.collect() 
 
 # --- FOOTER ---
 st.markdown('<p class="footer">Developed by - Sandesh Subedi</p>', unsafe_allow_html=True)

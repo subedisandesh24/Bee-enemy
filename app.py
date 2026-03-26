@@ -1,6 +1,7 @@
 import os
 # Fix for Streamlit Cloud settings warning and concurrency
 os.environ['YOLO_CONFIG_DIR'] = '/tmp'
+# Set to 500MB explicitly for file uploads in the environment
 os.environ['STREAMLIT_SERVER_MAX_MESSAGE_SIZE'] = '500m' 
 
 import streamlit as st
@@ -172,11 +173,18 @@ with tabs[0]:
             gc.collect() 
 
 # ==========================================
-# 2. BEE SPECIES ID & INFO (Restructured)
+# 2. BEE SPECIES ID & INFO (Restructured - Conditional Display)
 # ==========================================
 with tabs[1]:
     st.header("Bee Species Identification")
-    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up2")
+    # --- FILE UPLOADER ---
+    file = st.file_uploader(
+        "Upload Image", 
+        type=['jpg','png','jpeg'], 
+        key="up2",
+        # Update help text to reflect the stricter environment limit, as 200MB is too low
+        help="Limit is set by server environment (currently approx. 500MB total payload). Images are resized to 512x512 for processing."
+    )
     
     if 'detected_species' not in st.session_state:
         st.session_state.detected_species = None
@@ -205,25 +213,27 @@ with tabs[1]:
             gc.collect()
 
     # --- INFO DISPLAY SECTION (CONDITIONAL DISPLAY) ---
-    st.markdown("---")
-    st.subheader("More Information of this Species")
-    
     species_to_show = st.session_state.detected_species
     
-    # If an image was processed, use the result, otherwise let user select manually
-    if not species_to_show:
-        species_to_show = st.selectbox(
-            "Or select a species manually:", 
-            options=[""] + list(BEE_PROFILES.keys()),
-            index=0
-        )
-        
-    # ONLY display the box if a valid species is selected/detected
-    if species_to_show and species_to_show in BEE_PROFILES:
-        profile_html = BEE_PROFILES[species_to_show]
-        st.markdown(profile_html, unsafe_allow_html=True)
-    elif species_to_show:
-        st.info(f"Profile for {species_to_show} is available but not currently loaded.")
+    # If an image was processed AND identified, OR if a manual selection exists
+    if species_to_show in BEE_PROFILES or (not file and st.session_state.detected_species):
+        st.markdown("---")
+        st.subheader("More Information of this Species")
+    
+        # Logic to determine which species to show (detected or manually selected)
+        if not species_to_show:
+            species_to_show = st.selectbox(
+                "Or select a species manually:", 
+                options=[""] + list(BEE_PROFILES.keys()),
+                index=0
+            )
+            
+        if species_to_show and species_to_show in BEE_PROFILES:
+            profile_html = BEE_PROFILES[species_to_show]
+            st.markdown(profile_html, unsafe_allow_html=True)
+        elif species_to_show:
+            st.info(f"Profile for {species_to_show} is available but not currently loaded.")
+
 
 # ==========================================
 # 3. PEST DETECTOR 
@@ -255,7 +265,7 @@ with tabs[2]:
             gc.collect()
 
 # ==========================================
-# 4. PEST SPECIES ID (No extra info box)
+# 4. PEST SPECIES ID (Only Name/Confidence + Download)
 # ==========================================
 with tabs[3]:
     st.header("Pest Species Identification")
@@ -269,8 +279,16 @@ with tabs[3]:
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
                 top = results[int(best_idx)]
+                
+                # Display only Name and Confidence, then download button
                 st.warning(f"### Detected Threat: {top.names[int(top.boxes.cls[0])]} (Conf: {top.boxes.conf[0]:.2f})")
                 st.image(top.plot(line_width=1, font_size=10), width=zoom_val)
+                st.download_button(
+                    label="📥 Download Result",
+                    data=get_image_download(top.plot(line_width=1, font_size=10)),
+                    file_name="pest_result.jpg"
+                )
+
             else: 
                 st.info("No threats identified.")
                 
@@ -284,7 +302,7 @@ with tabs[3]:
 with tabs[4]:
     st.header("Video Tracking")
     mode = st.radio("Target:",["Bees", "Pests"], horizontal=True)
-    v_file = st.file_uploader("Upload Video", type=['mp4','mov','avi'])
+    v_file = st.file_uploader("Upload Video", type=['mp4','mov','avi'], key="vid_up")
     
     if v_file:
         if st.button("🎥 Start Tracking"):
@@ -292,7 +310,7 @@ with tabs[4]:
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
             
-            VIDEO_FRAME_SIZE = 512 # Small size for stability/speed trade-off
+            VIDEO_FRAME_SIZE = 512
             
             t_in_path = None
             t_out_path = None

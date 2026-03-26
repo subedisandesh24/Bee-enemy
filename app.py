@@ -24,10 +24,7 @@ st.sidebar.header("🖼️ Display Settings")
 zoom_val = st.sidebar.slider("Image Scale (Zoom)", min_value=300, max_value=2000, value=800)
 
 st.sidebar.header("🎛️ Detection Settings")
-# Keep this as the default for now
 conf_val = st.sidebar.slider("Confidence Threshold", min_value=0.10, max_value=1.00, value=0.25, step=0.05)
-# Add a setting for lower confidence testing if needed later
-# pest_conf_val = st.sidebar.slider("Pest Confidence Threshold", min_value=0.50, max_value=1.00, value=0.65, step=0.05)
 
 
 # --- CUSTOM CSS ---
@@ -48,9 +45,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- BEE SPECIES DATA (Kept as is) ---
+# --- BEE SPECIES DATA ---
 BEE_PROFILES = {
-    # ... (Your BEE_PROFILES dictionary remains here) ...
     "Apis laboriosa": """
         <div class="bee-info">
         <h3>🍯 <b>Apis laboriosa</b></h3>
@@ -120,15 +116,13 @@ def trigger_vibration():
 
 @st.cache_resource
 def load_models():
-    # NOTE: Ensure your /models folder structure is correct relative to this script
     base_dir = os.path.dirname(os.path.abspath(__file__))
     b_path = os.path.join(base_dir, 'models', 'bee_best.pt')
     e_path = os.path.join(base_dir, 'models', 'enemy_best.pt')
-    
-    # Using a very small image size for model loading/initialization (will be overridden later)
     return YOLO(b_path), YOLO(e_path)
 
-def process_image_memory_safe(file, max_inference_size=1024):
+# *** MEMORY FIX: Hardcoded max_inference_size=768 ***
+def process_image_memory_safe(file, max_inference_size=768):
     """Loads, converts, and resizes image for safe processing."""
     img = Image.open(file).convert("RGB")
     
@@ -159,18 +153,17 @@ with tabs[0]:
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up1")
     
     if file:
-        # Use a slightly larger size for the main display/default run (0.25 conf)
-        img = process_image_memory_safe(file, max_inference_size=1024) 
+        # Use the smaller, memory-safe size (768) for inference processing
+        img = process_image_memory_safe(file, max_inference_size=768) 
         st.image(img, width=zoom_val)
         
         if st.button("🚀 Run Detection", key="btn1"):
             img_cv = np.array(img)
             
-            # Inference uses the current sidebar conf_val
-            results_bee = bee_model(img, conf=conf_val, imgsz=1024, verbose=False)[0]
+            # Use imgsz=768 to match the loaded image size for optimal processing
+            results_bee = bee_model(img, conf=conf_val, imgsz=768, verbose=False)[0]
             results_bee.names = {i: "Bee" for i in range(len(results_bee.names))}
             
-            # Plotting creates the final output buffer
             ann_img = results_bee.plot(img=img_cv.copy(), line_width=1, font_size=10)
             
             st.subheader(f"📊 Results: {len(results_bee.boxes)} Bees Found")
@@ -181,6 +174,7 @@ with tabs[0]:
             # RAM Cleanup
             del img, img_cv, results_bee, ann_img
             gc.collect()
+            gc.collect() # Second call for aggressive cleanup
 
 # ==========================================
 # 2. BEE SPECIES ID 
@@ -189,13 +183,12 @@ with tabs[1]:
     st.header("Bee Species Identification")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up2")
     if file:
-        # Use a slightly larger size for the main display/default run (0.25 conf)
-        img = process_image_memory_safe(file, max_inference_size=1024)
+        # Use the smaller, memory-safe size (768) for inference processing
+        img = process_image_memory_safe(file, max_inference_size=768)
         st.image(img, width=zoom_val)
         
         if st.button("🧬 Identify Primary Species", key="btn2"):
-            # Inference uses the current sidebar conf_val
-            results = bee_model(img, conf=conf_val, imgsz=1024, verbose=False)[0]
+            results = bee_model(img, conf=conf_val, imgsz=768, verbose=False)[0]
             
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
@@ -212,6 +205,7 @@ with tabs[1]:
             # RAM Cleanup
             del img, results
             gc.collect()
+            gc.collect() # Second call
 
 # ==========================================
 # 3. PEST DETECTOR 
@@ -220,14 +214,12 @@ with tabs[2]:
     st.header("Bee Enemy Detector")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up3")
     if file:
-        # PEST detection uses a higher fixed confidence (0.65)
-        img = process_image_memory_safe(file, max_inference_size=1024)
+        img = process_image_memory_safe(file, max_inference_size=768)
         st.image(img, width=zoom_val)
         
         if st.button("🛡️ Run Security Scan", key="btn3"):
             img_cv = np.array(img)
-            # Pest model uses a fixed, higher confidence for better precision
-            results = enemy_model(img, conf=0.65, imgsz=1024, verbose=False)[0] 
+            results = enemy_model(img, conf=0.65, imgsz=768, verbose=False)[0] 
             results.names = {i: "Pest" for i in range(len(results.names))}
             
             ann_img = results.plot(img=img_cv.copy(), line_width=1, font_size=10)
@@ -243,6 +235,7 @@ with tabs[2]:
             # RAM Cleanup
             del img, img_cv, results, ann_img
             gc.collect()
+            gc.collect()
 
 # ==========================================
 # 4. PEST SPECIES ID 
@@ -251,12 +244,11 @@ with tabs[3]:
     st.header("Pest Species Identification")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up4")
     if file:
-        # Pest model uses a fixed, higher confidence for better precision
-        img = process_image_memory_safe(file, max_inference_size=1024)
+        img = process_image_memory_safe(file, max_inference_size=768)
         st.image(img, width=zoom_val)
         
         if st.button("🦠 Identify Primary Pest", key="btn4"):
-            results = enemy_model(img, conf=0.65, imgsz=1024, verbose=False)[0]
+            results = enemy_model(img, conf=0.65, imgsz=768, verbose=False)[0]
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
                 top = results[int(best_idx)]
@@ -267,6 +259,7 @@ with tabs[3]:
                 
             # RAM Cleanup
             del img, results
+            gc.collect()
             gc.collect()
 
 # ==========================================
@@ -280,20 +273,16 @@ with tabs[4]:
     if v_file:
         if st.button("🎥 Start Tracking"):
             
-            # Set specific confidences for video tracking
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
             
-            # Use a smaller size for video frames to save RAM during processing
-            VIDEO_FRAME_SIZE = 640 
+            VIDEO_FRAME_SIZE = 640 # Keep video frames even smaller for throughput
             
-            # File references for failsafe cleanup
             t_in_path = None
             t_out_path = None
             h264_path = None
             
             try:
-                # 1. Create secure temp input
                 t_in = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
                 t_in_path = t_in.name
                 t_in.write(v_file.read())
@@ -307,14 +296,12 @@ with tabs[4]:
                 if fps == 0 or np.isnan(fps): fps = 30 
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 
-                # Dynamic Resize based on VIDEO_FRAME_SIZE
                 if max(w_orig, h_orig) > VIDEO_FRAME_SIZE:
                     scale = VIDEO_FRAME_SIZE / float(max(w_orig, h_orig))
                     w_out, h_out = int(w_orig * scale), int(h_orig * scale)
                 else:
                     w_out, h_out = w_orig, h_orig
 
-                # 2. Create secure temp output
                 t_out = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
                 t_out_path = t_out.name
                 t_out.close()
@@ -331,11 +318,9 @@ with tabs[4]:
                     if not ret: break
                     frame_count += 1
                     
-                    # Resize frame ONLY IF necessary
                     if (w_out, h_out) != (w_orig, h_orig):
                         frame = cv2.resize(frame, (w_out, h_out))
                     
-                    # Run model with the smaller frame size
                     res = model(frame, conf=track_conf, imgsz=VIDEO_FRAME_SIZE, verbose=False)[0] 
                     res.names = {i: mode[:-1] for i in range(len(res.names))}
                     
@@ -346,8 +331,7 @@ with tabs[4]:
                     cv2.putText(f_plot, f"Total Sum of {mode}: {total_sum}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
                     out.write(f_plot)
                     
-                    # Yield the Global Interpreter Lock (GIL)
-                    if frame_count % 10 == 0: # Check less often to speed up processing
+                    if frame_count % 10 == 0:
                         time.sleep(0.001) 
                         if total_frames > 0:
                             progress_bar.progress(min(frame_count / total_frames, 1.0), text=f"Processing Video... Frame {frame_count}/{total_frames}")
@@ -358,9 +342,7 @@ with tabs[4]:
                 
                 st.success(f"🐝 Final Summary: A total sum of {total_sum} {mode} detections were recorded across the entire video.")
                 
-                # Convert to H264 for Streamlit browser rendering (might be the bottleneck if large)
                 h264_path = t_out_path.replace('.mp4', '_h264.mp4')
-                # Use a lower bitrate preset (-preset veryfast) for faster encoding time
                 os.system(f"ffmpeg -y -i {t_out_path} -vcodec libx264 -preset veryfast -crf 23 {h264_path} > /dev/null 2>&1")
                 
                 final_path = h264_path if os.path.exists(h264_path) else t_out_path
@@ -385,13 +367,10 @@ with tabs[4]:
                 )
                 
             finally:
-                # 3. CRITICAL: Delete temp files IMMEDIATELY after rendering to prevent Disk crash!
                 if t_in_path and os.path.exists(t_in_path): os.remove(t_in_path)
                 if t_out_path and os.path.exists(t_out_path): os.remove(t_out_path)
                 if h264_path and os.path.exists(h264_path): os.remove(h264_path)
                 
-                # RAM Cleanup
-                # Explicitly call garbage collection multiple times in intensive blocks
                 gc.collect() 
                 gc.collect() 
 

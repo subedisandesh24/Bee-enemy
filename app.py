@@ -273,7 +273,7 @@ with tabs[3]:
         st.image(img, width=zoom_val)
         
         if st.button("🦠 Identify Primary Pest", key="btn4"):
-            results = enemy_model(img, conf=0.65, imgsz=512, verbose=False)[0]
+            results = enemy_model(img, conf=0.25, imgsz=512, verbose=False)[0]
             
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())

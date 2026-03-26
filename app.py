@@ -1,6 +1,5 @@
 import os
 # Fix for Streamlit Cloud settings warning and concurrency
-# Set to 500MB explicitly for file uploads
 os.environ['YOLO_CONFIG_DIR'] = '/tmp'
 os.environ['STREAMLIT_SERVER_MAX_MESSAGE_SIZE'] = '500m' 
 
@@ -41,7 +40,7 @@ st.markdown("""
     }
     .stImage > img { max-height: 75vh; object-fit: contain; display: block; margin: auto; }
     .footer { text-align: center; padding: 20px; font-weight: bold; color: #5a4609; border-top: 1px solid #ddd; margin-top: 50px;}
-    .bee-info { background-color: #fff9e6; padding: 20px; border-radius: 15px; border-left: 5px solid #ffc107; }
+    .bee-info { background-color: #fff9e6; padding: 20px; border-radius: 15px; border-left: 5px solid #ffc107; margin-top: 20px;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -121,12 +120,11 @@ def load_models():
     e_path = os.path.join(base_dir, 'models', 'enemy_best.pt')
     return YOLO(b_path), YOLO(e_path)
 
-# *** MEMORY FIX: Reduced max_inference_size to 512 ***
+# *** MEMORY FIX: Reduced max_inference_size to 512 for static images ***
 def process_image_memory_safe(file, max_inference_size=512):
     """Loads, converts, and resizes image for safe processing."""
     img = Image.open(file).convert("RGB")
     
-    # Aggressively resize for low-confidence/memory-sensitive runs
     if max(img.size) > max_inference_size:
         img.thumbnail((max_inference_size, max_inference_size), Image.Resampling.LANCZOS)
         
@@ -143,7 +141,7 @@ bee_model, enemy_model = load_models()
 
 st.title("🐝 Hive Health & Security Monitor")
 
-tabs = st.tabs(["🔍 Bee Detector", "🧬 Bee Species ID", "🛡️ Pest Detector", "🦠 Pest Species ID", "🎥 Video Tracking"])
+tabs = st.tabs(["🔍 Bee Detector", "🧬 Bee Species ID & Info", "🛡️ Pest Detector", "🦠 Pest Species ID", "🎥 Video Tracking"])
 
 # ==========================================
 # 1. BEE DETECTOR (Standalone)
@@ -171,17 +169,20 @@ with tabs[0]:
             st.image(ann_img, width=zoom_val)
             st.download_button("📥 Download Result", get_image_download(ann_img), "bee_detection.jpg")
             
-            # RAM Cleanup
             del img, img_cv, results_bee, ann_img
             gc.collect()
             gc.collect() 
 
 # ==========================================
-# 2. BEE SPECIES ID 
+# 2. BEE SPECIES ID & INFO (Restructured)
 # ==========================================
 with tabs[1]:
     st.header("Bee Species Identification")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up2")
+    
+    if 'detected_species' not in st.session_state:
+        st.session_state.detected_species = None
+        
     if file:
         img = process_image_memory_safe(file, max_inference_size=512)
         st.image(img, width=zoom_val)
@@ -194,17 +195,36 @@ with tabs[1]:
                 top = results[int(best_idx)]
                 species_name = top.names[int(top.boxes.cls[0])]
                 
-                st.success(f"### Detected Species: {species_name} (Confidence: {top.boxes.conf[0]:.2f})")
+                st.session_state.detected_species = species_name
+                st.success(f"### Identified Species: {species_name} (Confidence: {top.boxes.conf[0]:.2f})")
                 
-                profile_html = BEE_PROFILES.get(species_name, "Species details coming soon.")
-                st.markdown(profile_html, unsafe_allow_html=True)
             else: 
+                st.session_state.detected_species = None
                 st.warning("No bees detected for identification at this confidence level.")
             
-            # RAM Cleanup
             del img, results
             gc.collect()
             gc.collect()
+
+    # --- INFO DISPLAY SECTION ---
+    st.markdown("---")
+    st.subheader("More Information of this Species")
+    
+    species_to_show = st.session_state.detected_species
+    
+    # Allow user to select species manually if no image was processed
+    if not species_to_show:
+        species_to_show = st.selectbox(
+            "Or select a species manually:", 
+            options=[""] + list(BEE_PROFILES.keys()),
+            index=0
+        )
+        
+    if species_to_show and species_to_show in BEE_PROFILES:
+        profile_html = BEE_PROFILES[species_to_show]
+        st.markdown(profile_html, unsafe_allow_html=True)
+    elif species_to_show:
+        st.info(f"Profile for {species_to_show} is available but not currently loaded.")
 
 # ==========================================
 # 3. PEST DETECTOR 
@@ -231,7 +251,6 @@ with tabs[2]:
             st.image(ann_img, width=zoom_val)
             st.download_button("📥 Download", get_image_download(ann_img), "pest_detection.jpg")
             
-            # RAM Cleanup
             del img, img_cv, results, ann_img
             gc.collect()
             gc.collect()
@@ -256,13 +275,12 @@ with tabs[3]:
             else: 
                 st.info("No threats identified.")
                 
-            # RAM Cleanup
             del img, results
             gc.collect()
             gc.collect()
 
 # ==========================================
-# 5. VIDEO TRACKING (Multi-User Safe & Optimized)
+# 5. VIDEO TRACKING (Slow but Accurate)
 # ==========================================
 with tabs[4]:
     st.header("Video Tracking")
@@ -275,7 +293,7 @@ with tabs[4]:
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
             
-            VIDEO_FRAME_SIZE = 512 # Use smaller size for video frames too
+            VIDEO_FRAME_SIZE = 512 # Keep video frames small for speed
             
             t_in_path = None
             t_out_path = None
@@ -320,17 +338,18 @@ with tabs[4]:
                     if (w_out, h_out) != (w_orig, h_orig):
                         frame = cv2.resize(frame, (w_out, h_out))
                     
+                    # Process every frame (for best accuracy) at the small size
                     res = model(frame, conf=track_conf, imgsz=VIDEO_FRAME_SIZE, verbose=False)[0] 
                     res.names = {i: mode[:-1] for i in range(len(res.names))}
                     
-                    current_count = len(res.boxes)
-                    total_sum += current_count
+                    total_sum += len(res.boxes)
                     
                     f_plot = res.plot(line_width=1, font_size=10)
                     cv2.putText(f_plot, f"Total Sum of {mode}: {total_sum}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
                     out.write(f_plot)
                     
-                    if frame_count % 10 == 0:
+                    # Yield GIL occasionally
+                    if frame_count % 10 == 0: 
                         time.sleep(0.001) 
                         if total_frames > 0:
                             progress_bar.progress(min(frame_count / total_frames, 1.0), text=f"Processing Video... Frame {frame_count}/{total_frames}")

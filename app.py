@@ -1,7 +1,6 @@
 import os
 # Fix for Streamlit Cloud settings warning and concurrency
 os.environ['YOLO_CONFIG_DIR'] = '/tmp'
-# Set to 500MB explicitly for file uploads in the environment
 os.environ['STREAMLIT_SERVER_MAX_MESSAGE_SIZE'] = '500m' 
 
 import streamlit as st
@@ -182,8 +181,8 @@ with tabs[1]:
         "Upload Image", 
         type=['jpg','png','jpeg'], 
         key="up2",
-        # Update help text to reflect the stricter environment limit, as 200MB is too low
-        help="Limit is set by server environment (currently approx. 500MB total payload). Images are resized to 512x512 for processing."
+        # Updated help text for size clarification (Server limit is 500m)
+        help="Limit is set by server environment (approx. 500MB). Images are resized to 512x512 for processing."
     )
     
     if 'detected_species' not in st.session_state:
@@ -215,11 +214,11 @@ with tabs[1]:
     # --- INFO DISPLAY SECTION (CONDITIONAL DISPLAY) ---
     species_to_show = st.session_state.detected_species
     
-    # If an image was processed AND identified, OR if a manual selection exists
+    # Only show the section if a species has been identified OR manually selected
     if species_to_show in BEE_PROFILES or (not file and st.session_state.detected_species):
         st.markdown("---")
         st.subheader("More Information of this Species")
-    
+        
         # Logic to determine which species to show (detected or manually selected)
         if not species_to_show:
             species_to_show = st.selectbox(
@@ -233,7 +232,6 @@ with tabs[1]:
             st.markdown(profile_html, unsafe_allow_html=True)
         elif species_to_show:
             st.info(f"Profile for {species_to_show} is available but not currently loaded.")
-
 
 # ==========================================
 # 3. PEST DETECTOR 
@@ -276,19 +274,22 @@ with tabs[3]:
         
         if st.button("🦠 Identify Primary Pest", key="btn4"):
             results = enemy_model(img, conf=0.65, imgsz=512, verbose=False)[0]
+            
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
                 top = results[int(best_idx)]
                 
-                # Display only Name and Confidence, then download button
+                # --- ADJUSTMENT: Display ONLY name/confidence and the image plot (No extra download button) ---
                 st.warning(f"### Detected Threat: {top.names[int(top.boxes.cls[0])]} (Conf: {top.boxes.conf[0]:.2f})")
                 st.image(top.plot(line_width=1, font_size=10), width=zoom_val)
+                
+                # Keeping the *original* download button for the annotated image (from Tab 2 logic)
                 st.download_button(
-                    label="📥 Download Result",
+                    label="📥 Download Annotated Image",
                     data=get_image_download(top.plot(line_width=1, font_size=10)),
                     file_name="pest_result.jpg"
                 )
-
+                
             else: 
                 st.info("No threats identified.")
                 
@@ -355,7 +356,6 @@ with tabs[4]:
                     if (w_out, h_out) != (w_orig, h_orig):
                         frame = cv2.resize(frame, (w_out, h_out))
                     
-                    # Process every frame at the small size (for max accuracy)
                     res = model(frame, conf=track_conf, imgsz=VIDEO_FRAME_SIZE, verbose=False)[0] 
                     res.names = {i: mode[:-1] for i in range(len(res.names))}
                     
@@ -365,7 +365,6 @@ with tabs[4]:
                     cv2.putText(f_plot, f"Total Sum of {mode}: {total_sum}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
                     out.write(f_plot)
                     
-                    # Yield GIL minimally
                     if frame_count % 100 == 0: 
                         time.sleep(0.001) 
                         if total_frames > 0:

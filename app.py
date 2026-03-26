@@ -245,7 +245,7 @@ with tabs[2]:
         
         if st.button("🛡️ Run Security Scan", key="btn3"):
             img_cv = np.array(img)
-            results = enemy_model(img, conf=0.65, imgsz=512, verbose=False)[0] 
+            results = enemy_model(img, conf=0.25, imgsz=512, verbose=False)[0] 
             results.names = {i: "Pest" for i in range(len(results.names))}
             
             ann_img = results.plot(img=img_cv.copy(), line_width=1, font_size=10)

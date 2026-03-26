@@ -151,14 +151,12 @@ with tabs[0]:
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up1")
     
     if file:
-        # Use the smallest size (512) for inference processing
         img = process_image_memory_safe(file, max_inference_size=512) 
         st.image(img, width=zoom_val)
         
         if st.button("🚀 Run Detection", key="btn1"):
             img_cv = np.array(img)
             
-            # Use imgsz=512 to match the loaded image size
             results_bee = bee_model(img, conf=conf_val, imgsz=512, verbose=False)[0]
             results_bee.names = {i: "Bee" for i in range(len(results_bee.names))}
             
@@ -212,7 +210,6 @@ with tabs[1]:
     
     species_to_show = st.session_state.detected_species
     
-    # Allow user to select species manually if no image was processed
     if not species_to_show:
         species_to_show = st.selectbox(
             "Or select a species manually:", 
@@ -280,7 +277,7 @@ with tabs[3]:
             gc.collect()
 
 # ==========================================
-# 5. VIDEO TRACKING (Slow but Accurate)
+# 5. VIDEO TRACKING (Slow but Accurate - Max Efficiency)
 # ==========================================
 with tabs[4]:
     st.header("Video Tracking")
@@ -293,7 +290,7 @@ with tabs[4]:
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
             
-            VIDEO_FRAME_SIZE = 512 # Keep video frames small for speed
+            VIDEO_FRAME_SIZE = 512 # Keep video frames small for stability/speed trade-off
             
             t_in_path = None
             t_out_path = None
@@ -328,7 +325,7 @@ with tabs[4]:
                 frame_count = 0
                 total_sum = 0 
                 
-                progress_bar = st.progress(0, text="Processing video for multiple users. Please wait...")
+                progress_bar = st.progress(0, text="Processing video... Please wait, this might take a while for long videos.")
                 
                 while cap.isOpened():
                     ret, frame = cap.read()
@@ -338,7 +335,7 @@ with tabs[4]:
                     if (w_out, h_out) != (w_orig, h_orig):
                         frame = cv2.resize(frame, (w_out, h_out))
                     
-                    # Process every frame (for best accuracy) at the small size
+                    # Process every frame at the small size (for max accuracy)
                     res = model(frame, conf=track_conf, imgsz=VIDEO_FRAME_SIZE, verbose=False)[0] 
                     res.names = {i: mode[:-1] for i in range(len(res.names))}
                     
@@ -348,8 +345,8 @@ with tabs[4]:
                     cv2.putText(f_plot, f"Total Sum of {mode}: {total_sum}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
                     out.write(f_plot)
                     
-                    # Yield GIL occasionally
-                    if frame_count % 10 == 0: 
+                    # Yield GIL minimally
+                    if frame_count % 100 == 0: 
                         time.sleep(0.001) 
                         if total_frames > 0:
                             progress_bar.progress(min(frame_count / total_frames, 1.0), text=f"Processing Video... Frame {frame_count}/{total_frames}")

@@ -121,8 +121,8 @@ def load_models():
     e_path = os.path.join(base_dir, 'models', 'enemy_best.pt')
     return YOLO(b_path), YOLO(e_path)
 
-# *** MEMORY FIX: Hardcoded max_inference_size=768 ***
-def process_image_memory_safe(file, max_inference_size=768):
+# *** MEMORY FIX: Reduced max_inference_size to 512 ***
+def process_image_memory_safe(file, max_inference_size=512):
     """Loads, converts, and resizes image for safe processing."""
     img = Image.open(file).convert("RGB")
     
@@ -153,15 +153,15 @@ with tabs[0]:
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up1")
     
     if file:
-        # Use the smaller, memory-safe size (768) for inference processing
-        img = process_image_memory_safe(file, max_inference_size=768) 
+        # Use the smallest size (512) for inference processing
+        img = process_image_memory_safe(file, max_inference_size=512) 
         st.image(img, width=zoom_val)
         
         if st.button("🚀 Run Detection", key="btn1"):
             img_cv = np.array(img)
             
-            # Use imgsz=768 to match the loaded image size for optimal processing
-            results_bee = bee_model(img, conf=conf_val, imgsz=768, verbose=False)[0]
+            # Use imgsz=512 to match the loaded image size
+            results_bee = bee_model(img, conf=conf_val, imgsz=512, verbose=False)[0]
             results_bee.names = {i: "Bee" for i in range(len(results_bee.names))}
             
             ann_img = results_bee.plot(img=img_cv.copy(), line_width=1, font_size=10)
@@ -174,7 +174,7 @@ with tabs[0]:
             # RAM Cleanup
             del img, img_cv, results_bee, ann_img
             gc.collect()
-            gc.collect() # Second call for aggressive cleanup
+            gc.collect() 
 
 # ==========================================
 # 2. BEE SPECIES ID 
@@ -183,12 +183,11 @@ with tabs[1]:
     st.header("Bee Species Identification")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up2")
     if file:
-        # Use the smaller, memory-safe size (768) for inference processing
-        img = process_image_memory_safe(file, max_inference_size=768)
+        img = process_image_memory_safe(file, max_inference_size=512)
         st.image(img, width=zoom_val)
         
         if st.button("🧬 Identify Primary Species", key="btn2"):
-            results = bee_model(img, conf=conf_val, imgsz=768, verbose=False)[0]
+            results = bee_model(img, conf=conf_val, imgsz=512, verbose=False)[0]
             
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
@@ -205,7 +204,7 @@ with tabs[1]:
             # RAM Cleanup
             del img, results
             gc.collect()
-            gc.collect() # Second call
+            gc.collect()
 
 # ==========================================
 # 3. PEST DETECTOR 
@@ -214,12 +213,12 @@ with tabs[2]:
     st.header("Bee Enemy Detector")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up3")
     if file:
-        img = process_image_memory_safe(file, max_inference_size=768)
+        img = process_image_memory_safe(file, max_inference_size=512)
         st.image(img, width=zoom_val)
         
         if st.button("🛡️ Run Security Scan", key="btn3"):
             img_cv = np.array(img)
-            results = enemy_model(img, conf=0.65, imgsz=768, verbose=False)[0] 
+            results = enemy_model(img, conf=0.65, imgsz=512, verbose=False)[0] 
             results.names = {i: "Pest" for i in range(len(results.names))}
             
             ann_img = results.plot(img=img_cv.copy(), line_width=1, font_size=10)
@@ -244,11 +243,11 @@ with tabs[3]:
     st.header("Pest Species Identification")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up4")
     if file:
-        img = process_image_memory_safe(file, max_inference_size=768)
+        img = process_image_memory_safe(file, max_inference_size=512)
         st.image(img, width=zoom_val)
         
         if st.button("🦠 Identify Primary Pest", key="btn4"):
-            results = enemy_model(img, conf=0.65, imgsz=768, verbose=False)[0]
+            results = enemy_model(img, conf=0.65, imgsz=512, verbose=False)[0]
             if len(results.boxes) > 0:
                 best_idx = np.argmax(results.boxes.conf.cpu().numpy())
                 top = results[int(best_idx)]
@@ -276,7 +275,7 @@ with tabs[4]:
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
             
-            VIDEO_FRAME_SIZE = 640 # Keep video frames even smaller for throughput
+            VIDEO_FRAME_SIZE = 512 # Use smaller size for video frames too
             
             t_in_path = None
             t_out_path = None

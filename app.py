@@ -120,7 +120,7 @@ def load_models():
     e_path = os.path.join(base_dir, 'models', 'enemy_best.pt')
     return YOLO(b_path), YOLO(e_path)
 
-# *** MEMORY FIX: Reduced max_inference_size to 512 for static images ***
+# *** MEMORY FIX: Reduced max_inference_size to 512 ***
 def process_image_memory_safe(file, max_inference_size=512):
     """Loads, converts, and resizes image for safe processing."""
     img = Image.open(file).convert("RGB")
@@ -218,6 +218,7 @@ with tabs[1]:
         )
         
     if species_to_show and species_to_show in BEE_PROFILES:
+        # Display only the profile for the detected/selected species
         profile_html = BEE_PROFILES[species_to_show]
         st.markdown(profile_html, unsafe_allow_html=True)
     elif species_to_show:
@@ -290,7 +291,7 @@ with tabs[4]:
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
             
-            VIDEO_FRAME_SIZE = 512 # Keep video frames small for stability/speed trade-off
+            VIDEO_FRAME_SIZE = 512 # Small size for stability/speed trade-off
             
             t_in_path = None
             t_out_path = None
@@ -386,4 +387,8 @@ with tabs[4]:
                 if t_out_path and os.path.exists(t_out_path): os.remove(t_out_path)
                 if h264_path and os.path.exists(h264_path): os.remove(h264_path)
                 
-                gc.collect()
+                gc.collect() 
+                gc.collect() 
+
+# --- FOOTER ---
+st.markdown('<p class="footer">Developed by - Sandesh Subedi</p>', unsafe_allow_html=True)

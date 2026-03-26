@@ -204,12 +204,13 @@ with tabs[1]:
             gc.collect()
             gc.collect()
 
-    # --- INFO DISPLAY SECTION ---
+    # --- INFO DISPLAY SECTION (CONDITIONAL DISPLAY) ---
     st.markdown("---")
     st.subheader("More Information of this Species")
     
     species_to_show = st.session_state.detected_species
     
+    # If an image was processed, use the result, otherwise let user select manually
     if not species_to_show:
         species_to_show = st.selectbox(
             "Or select a species manually:", 
@@ -217,8 +218,8 @@ with tabs[1]:
             index=0
         )
         
+    # ONLY display the box if a valid species is selected/detected
     if species_to_show and species_to_show in BEE_PROFILES:
-        # Display only the profile for the detected/selected species
         profile_html = BEE_PROFILES[species_to_show]
         st.markdown(profile_html, unsafe_allow_html=True)
     elif species_to_show:
@@ -254,7 +255,7 @@ with tabs[2]:
             gc.collect()
 
 # ==========================================
-# 4. PEST SPECIES ID 
+# 4. PEST SPECIES ID (No extra info box)
 # ==========================================
 with tabs[3]:
     st.header("Pest Species Identification")

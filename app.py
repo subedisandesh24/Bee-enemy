@@ -386,8 +386,4 @@ with tabs[4]:
                 if t_out_path and os.path.exists(t_out_path): os.remove(t_out_path)
                 if h264_path and os.path.exists(h264_path): os.remove(h264_path)
                 
-                gc.collect() 
-                gc.collect() 
-
-# --- FOOTER ---
-st.markdown('<p class="footer">Developed by - Sandesh Subedi</p>', unsafe_allow_html=True)
+                gc.collect()

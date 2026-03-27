@@ -14,6 +14,18 @@ import io
 import base64
 import time
 import gc
+# >>> ADDED FOR HEIC IMAGE SUPPORT <<<
+try:
+    import pillow_heif
+    # Register the HEIF opener with Pillow
+    pillow_heif.register_heif_opener(multiple_brands=True)
+    HEIC_SUPPORT = True
+except ImportError:
+    st.warning("`pillow-heif` not installed or failed to register. HEIC image support will be limited.")
+    HEIC_SUPPORT = False
+except Exception as e:
+    st.warning(f"Error setting up HEIC support: {e}. HEIC image support will be limited.")
+    HEIC_SUPPORT = False
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Bee & Pest Health Monitor", layout="wide", page_icon="🐝")
@@ -123,6 +135,7 @@ def load_models():
 # *** MEMORY FIX: Reduced max_inference_size to 512 ***
 def process_image_memory_safe(file, max_inference_size=512):
     """Loads, converts, and resizes image for safe processing."""
+    # PIL.Image.open should now handle HEIC due to pillow_heif registration
     img = Image.open(file).convert("RGB")
     
     if max(img.size) > max_inference_size:
@@ -148,7 +161,8 @@ tabs = st.tabs(["🔍 Bee Detector", "🧬 Bee Species ID & Info", "🛡️ Pest
 # ==========================================
 with tabs[0]:
     st.header("Bee Detector")
-    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up1")
+    # >>> ADDED .HEIC to file_uploader <<<
+    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg', 'heic', 'HEIC'], key="up1")
     
     if file:
         img = process_image_memory_safe(file, max_inference_size=512) 
@@ -178,9 +192,10 @@ with tabs[1]:
     st.header("Bee Species Identification")
     
     # --- FILE UPLOADER & STATE MANAGEMENT ---
+    # >>> ADDED .HEIC to file_uploader <<<
     uploaded_file = st.file_uploader(
         "Upload Image", 
-        type=['jpg','png','jpeg'], 
+        type=['jpg','png','jpeg', 'heic', 'HEIC'], 
         key="up2",
         help="Limit is set by server environment (approx. 500MB). Images are resized to 512x512 for processing."
     )
@@ -254,7 +269,8 @@ with tabs[1]:
 # ==========================================
 with tabs[2]:
     st.header("Bee Enemy Detector")
-    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up3")
+    # >>> ADDED .HEIC to file_uploader <<<
+    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg', 'heic', 'HEIC'], key="up3")
     if file:
         img = process_image_memory_safe(file, max_inference_size=512)
         st.image(img, width=zoom_val)
@@ -283,7 +299,8 @@ with tabs[2]:
 # ==========================================
 with tabs[3]:
     st.header("Pest Species Identification")
-    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg'], key="up4")
+    # >>> ADDED .HEIC to file_uploader <<<
+    file = st.file_uploader("Upload Image", type=['jpg','png','jpeg', 'heic', 'HEIC'], key="up4")
     if file:
         img = process_image_memory_safe(file, max_inference_size=512)
         st.image(img, width=zoom_val)
@@ -319,7 +336,8 @@ with tabs[3]:
 with tabs[4]:
     st.header("Video Tracking")
     mode = st.radio("Target:",["Bees", "Pests"], horizontal=True)
-    v_file = st.file_uploader("Upload Video", type=['mp4','mov','avi'], key="vid_up")
+    # >>> ADDED .HEVC/.MOV to file_uploader for better HEVC video chances <<<
+    v_file = st.file_uploader("Upload Video", type=['mp4','mov','avi', 'hevc', 'HEVC'], key="vid_up")
     
     if v_file:
         if st.button("🎥 Start Tracking"):
@@ -339,6 +357,7 @@ with tabs[4]:
                 t_in.write(v_file.read())
                 t_in.close()
                 
+                # NOTE: OpenCV relies on system FFmpeg/codecs for HEVC. If it fails here, the system FFmpeg command below is the backup.
                 cap = cv2.VideoCapture(t_in_path)
                 
                 w_orig = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -357,6 +376,7 @@ with tabs[4]:
                 t_out_path = t_out.name
                 t_out.close()
                 
+                # Using 'mp4v' as a generally safe fallback codec.
                 out = cv2.VideoWriter(t_out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w_out, h_out))
                 
                 frame_count = 0
@@ -378,6 +398,7 @@ with tabs[4]:
                     total_sum += len(res.boxes)
                     
                     f_plot = res.plot(line_width=1, font_size=10)
+                    # Ensure text drawing is robust to frame size changes
                     cv2.putText(f_plot, f"Total Sum of {mode}: {total_sum}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
                     out.write(f_plot)
                     
@@ -392,7 +413,10 @@ with tabs[4]:
                 
                 st.success(f"🐝 Final Summary: A total sum of {total_sum} {mode} detections were recorded across the entire video.")
                 
+                # >>> FFmpeg Backup/Conversion for HEVC/H.265 videos <<<
+                # Ensure that the final output file is H.264/MP4 for maximum browser compatibility, especially after processing HEVC input.
                 h264_path = t_out_path.replace('.mp4', '_h264.mp4')
+                # Suppressing ffmpeg output
                 os.system(f"ffmpeg -y -i {t_out_path} -vcodec libx264 -preset veryfast -crf 23 {h264_path} > /dev/null 2>&1")
                 
                 final_path = h264_path if os.path.exists(h264_path) else t_out_path

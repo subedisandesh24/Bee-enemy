@@ -191,7 +191,7 @@ with tabs[1]:
     if 'last_uploaded_file' not in st.session_state:
         st.session_state.last_uploaded_file = None
 
-    # *** RESET LOGIC ***: Clear detection result if a new, different file is uploaded
+    # RESET LOGIC: Clear detection result if a new, different file is uploaded
     if uploaded_file and uploaded_file != st.session_state.last_uploaded_file:
         st.session_state.detected_species = None
         st.session_state.last_uploaded_file = uploaded_file
@@ -212,7 +212,7 @@ with tabs[1]:
                 top = results[int(best_idx)]
                 species_name = top.names[int(top.boxes.cls[0])]
                 
-                # Set the state to the new result, which triggers a rerun to display info
+                # Set the state to the new result, which triggers a rerun to display ONLY the result
                 st.session_state.detected_species = species_name
                 st.success(f"### Identified Species: {species_name} (Confidence: {top.boxes.conf[0]:.2f})")
                 
@@ -229,8 +229,9 @@ with tabs[1]:
     st.markdown("---")
     st.subheader("Species Information")
 
+    # The ONLY way to show the info box is by selecting from this dropdown.
     species_to_show_manually = st.selectbox(
-        "Or select a species manually:", 
+        "Select a species to view details:", 
         options=[""] + list(BEE_PROFILES.keys()),
         index=0,
         key="species_manual_select"
@@ -238,21 +239,23 @@ with tabs[1]:
     
     profile_key = None
     
-    # Determine which key to use for displaying info
-    if st.session_state.detected_species:
-        # 1. Show info for the detected species
-        st.info(f"Automatically Identified: **{st.session_state.detected_species}**")
-        profile_key = st.session_state.detected_species
-    elif species_to_show_manually:
-        # 2. Show info for manually selected species
+    # Check if user selected something from the dropdown
+    if species_to_show_manually:
         profile_key = species_to_show_manually
+        
+    # If the user does NOT select anything, we show a placeholder message
     else:
-        # 3. If nothing is detected AND nothing is manually selected, show placeholder text
-        st.info("Upload an image and click 'Identify Primary Species' to see results here, or select manually above.")
-
+        if st.session_state.detected_species:
+            # If a species was detected in the *previous* run, but the user has now
+            # cleared the manual selection (selected ""), show a prompt to select info.
+            st.info(f"Species detected previously: **{st.session_state.detected_species}**. Select a species from the list above to see its detailed profile.")
+        else:
+            # If nothing detected and nothing selected
+            st.info("Upload an image and click 'Identify Primary Species' for a result, or select a species above to view its profile.")
+        
     
+    # Display the profile box ONLY if a valid key was selected from the dropdown
     if profile_key and profile_key in BEE_PROFILES:
-        # This block only runs if we found a key either by detection or manual selection
         profile_html = BEE_PROFILES[profile_key]
         st.markdown(profile_html, unsafe_allow_html=True)
 # ==========================================

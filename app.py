@@ -18,7 +18,8 @@ import gc
 try:
     import pillow_heif
     # Register the HEIF opener with Pillow
-    pillow_heif.register_heif_opener(multiple_brands=True)
+    # >>> FIX APPLIED: Removed 'multiple_brands=True' to silence the warning <<<
+    pillow_heif.register_heif_opener() 
     HEIC_SUPPORT = True
 except ImportError:
     st.warning("`pillow-heif` not installed. HEIC image support will be limited.")
@@ -332,7 +333,7 @@ with tabs[3]:
             gc.collect()
 
 # ==========================================
-# 5. VIDEO TRACKING (Slow but Accurate - Max Efficiency)
+# 5. VIDEO TRACKING (Original Quality Download Logic)
 # ==========================================
 with tabs[4]:
     st.header("Video Tracking")
@@ -403,8 +404,6 @@ with tabs[4]:
                     # Plotting on the ORIGINAL-SIZED frame (frame)
                     f_plot = res.plot(img=frame.copy(), line_width=1, font_size=15)
                     
-                    # --- REMOVED: Cumulative Sum Overlay Text ---
-                    
                     # Write the annotated ORIGINAL-SIZED frame to the output
                     out.write(f_plot)
                     
@@ -452,7 +451,7 @@ with tabs[4]:
                 if h264_path and os.path.exists(h264_path): os.remove(h264_path)
                 
                 gc.collect() 
-                gc.collect()
+                gc.collect() 
 
 # --- FOOTER ---
 st.markdown('<p class="footer">Developed by - Sandesh Subedi</p>', unsafe_allow_html=True)

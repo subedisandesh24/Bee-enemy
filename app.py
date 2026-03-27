@@ -17,9 +17,8 @@ import gc
 # >>> ADDED FOR HEIC IMAGE SUPPORT <<<
 try:
     import pillow_heif
-    # Register the HEIF opener with Pillow
-    # >>> FIX APPLIED: Removed 'multiple_brands=True' to silence the warning <<<
-    pillow_heif.register_heif_opener() 
+    # Register the HEIF opener with Pillow (Fixed: Removed unknown option)
+    pillow_heif.register_heif_opener()
     HEIC_SUPPORT = True
 except ImportError:
     st.warning("`pillow-heif` not installed. HEIC image support will be limited.")
@@ -248,9 +247,6 @@ with tabs[1]:
     # This section is ONLY visible if a species was detected in the last run
     if st.session_state.detected_species:
         
-        # Display the success message again (or you can rely on the one from the button click)
-        # For clarity in the information section, we will just proceed to show the info.
-        
         profile_key = st.session_state.detected_species
         
         st.subheader(f"More Information on Identified Species: **{profile_key}**")
@@ -333,7 +329,7 @@ with tabs[3]:
             gc.collect()
 
 # ==========================================
-# 5. VIDEO TRACKING (Original Quality Download Logic)
+# 5. VIDEO TRACKING (Resized for Stability - Same logic as before)
 # ==========================================
 with tabs[4]:
     st.header("Video Tracking")
@@ -342,12 +338,12 @@ with tabs[4]:
     v_file = st.file_uploader("Upload Video", type=['mp4','mov','avi', 'hevc', 'HEVC'], key="vid_up")
     
     if v_file:
-        if st.button("🎥 Start Tracking & Download"):
+        if st.button("🎥 Start Tracking"): # Changed button text to match original for simplicity
             
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
             
-            VIDEO_FRAME_SIZE = 512 # Max inference size for model input
+            VIDEO_FRAME_SIZE = 512
             
             t_in_path = None
             t_out_path = None
@@ -367,17 +363,21 @@ with tabs[4]:
                 if fps == 0 or np.isnan(fps): fps = 30 
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 
-                # --- MODIFIED FOR ORIGINAL RESOLUTION OUTPUT ---
-                w_out, h_out = w_orig, h_orig 
-                
+                # --- RESIZING FOR STABILITY (Back to previous safe setting) ---
+                if max(w_orig, h_orig) > VIDEO_FRAME_SIZE:
+                    scale = VIDEO_FRAME_SIZE / float(max(w_orig, h_orig))
+                    w_out, h_out = int(w_orig * scale), int(h_orig * scale)
+                else:
+                    w_out, h_out = w_orig, h_orig
+
                 t_out = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
                 t_out_path = t_out.name
                 t_out.close()
                 
-                # Use the original resolution (w_out, h_out) for the VideoWriter
                 out = cv2.VideoWriter(t_out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w_out, h_out))
                 
                 frame_count = 0
+                total_sum = 0 
                 
                 progress_bar = st.progress(0, text="Processing video... Please wait, this might take a while for long videos.")
                 
@@ -386,25 +386,16 @@ with tabs[4]:
                     if not ret: break
                     frame_count += 1
                     
-                    # Frame resizing for MODEL INFERENCE ONLY (to 512x512)
-                    inference_frame = frame.copy()
-                    if max(w_orig, h_orig) > VIDEO_FRAME_SIZE:
-                        # Simple resize for inference to maintain aspect ratio based on max dimension
-                        if w_orig > h_orig:
-                            h_inf = int(VIDEO_FRAME_SIZE * h_orig / w_orig)
-                            w_inf = VIDEO_FRAME_SIZE
-                        else:
-                            w_inf = int(VIDEO_FRAME_SIZE * w_orig / h_orig)
-                            h_inf = VIDEO_FRAME_SIZE
-                        inference_frame = cv2.resize(inference_frame, (w_inf, h_inf))
+                    if (w_out, h_out) != (w_orig, h_orig):
+                        frame = cv2.resize(frame, (w_out, h_out))
                     
-                    res = model(inference_frame, conf=track_conf, imgsz=VIDEO_FRAME_SIZE, verbose=False)[0] 
+                    res = model(frame, conf=track_conf, imgsz=VIDEO_FRAME_SIZE, verbose=False)[0] 
                     res.names = {i: mode[:-1] for i in range(len(res.names))}
                     
-                    # Plotting on the ORIGINAL-SIZED frame (frame)
-                    f_plot = res.plot(img=frame.copy(), line_width=1, font_size=15)
+                    total_sum += len(res.boxes)
                     
-                    # Write the annotated ORIGINAL-SIZED frame to the output
+                    f_plot = res.plot(line_width=1, font_size=10)
+                    # --- REMOVED: Cumulative Sum Text Overlay ---
                     out.write(f_plot)
                     
                     if frame_count % 100 == 0: 
@@ -416,9 +407,8 @@ with tabs[4]:
                 out.release()
                 progress_bar.empty()
                 
-                st.success(f"✅ Processing Complete. Annotated video saved at original resolution.")
+                st.success(f"✅ Processing Complete. Annotated video processed.")
                 
-                # Re-encode to h264 for better browser compatibility, keeping the original resolution (w_out, h_out)
                 h264_path = t_out_path.replace('.mp4', '_h264.mp4')
                 os.system(f"ffmpeg -y -i {t_out_path} -vcodec libx264 -preset veryfast -crf 23 {h264_path} > /dev/null 2>&1")
                 
@@ -428,20 +418,18 @@ with tabs[4]:
                     video_bytes = f_v.read()
                 
                 b64 = base64.b64encode(video_bytes).decode()
-                
-                # Display video using original/output resolution
                 st.markdown(f'''
                     <div style="display:flex; justify-content:center; margin-bottom: 20px;">
-                        <video width="auto" controls autoplay loop style="max-width: 100%; height: auto;">
+                        <video width="{zoom_val}" controls autoplay loop>
                             <source src="data:video/mp4;base64,{b64}" type="video/mp4">
                         </video>
                     </div>
                 ''', unsafe_allow_html=True)
                 
                 st.download_button(
-                    label="📥 Download Annotated Video (Original Resolution)", 
+                    label="📥 Download Annotated Video", 
                     data=video_bytes, 
-                    file_name=f"annotated_{mode.lower()}_orig_res.mp4", 
+                    file_name=f"annotated_{mode.lower()}.mp4", 
                     mime="video/mp4"
                 )
                 

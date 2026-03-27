@@ -177,22 +177,39 @@ with tabs[0]:
 with tabs[1]:
     st.header("Bee Species Identification")
     # --- FILE UPLOADER ---
-    file = st.file_uploader(
+    # *** MODIFICATION START ***
+    uploaded_file = st.file_uploader(
         "Upload Image", 
         type=['jpg','png','jpeg'], 
         key="up2",
-        # Updated help text for size clarification (Server limit is 500m)
         help="Limit is set by server environment (approx. 500MB). Images are resized to 512x512 for processing."
     )
     
+    # Initialize state if it doesn't exist
     if 'detected_species' not in st.session_state:
         st.session_state.detected_species = None
+
+    # Reset detected_species immediately when a new file is uploaded
+    if uploaded_file and uploaded_file != getattr(st.session_state, 'last_uploaded_file', None):
+        st.session_state.detected_species = None
+        st.session_state.last_uploaded_file = uploaded_file
+    elif not uploaded_file:
+        st.session_state.last_uploaded_file = None
+        
+    file = uploaded_file
+    # *** MODIFICATION END ***
         
     if file:
         img = process_image_memory_safe(file, max_inference_size=512)
         st.image(img, width=zoom_val)
         
         if st.button("🧬 Identify Primary Species", key="btn2"):
+            # *** MODIFICATION START ***
+            # The detection result will naturally overwrite the session state
+            # on the next rerun. No explicit reset needed here unless we want
+            # to remove the manual dropdown selection.
+            # *** MODIFICATION END ***
+            
             results = bee_model(img, conf=conf_val, imgsz=512, verbose=False)[0]
             
             if len(results.boxes) > 0:
@@ -214,25 +231,29 @@ with tabs[1]:
     # --- INFO DISPLAY SECTION (CONDITIONAL DISPLAY) ---
     species_to_show = st.session_state.detected_species
     
-    # Only show the section if a species has been identified OR manually selected
-    if species_to_show in BEE_PROFILES or (not file and st.session_state.detected_species):
-        st.markdown("---")
-        st.subheader("More Information of this Species")
-        
-        # Logic to determine which species to show (detected or manually selected)
-        if not species_to_show:
-            species_to_show = st.selectbox(
-                "Or select a species manually:", 
-                options=[""] + list(BEE_PROFILES.keys()),
-                index=0
-            )
-            
-        if species_to_show and species_to_show in BEE_PROFILES:
-            profile_html = BEE_PROFILES[species_to_show]
-            st.markdown(profile_html, unsafe_allow_html=True)
-        elif species_to_show:
-            st.info(f"Profile for {species_to_show} is available but not currently loaded.")
+    st.markdown("---")
+    st.subheader("Species Information")
 
+    # Logic to determine which species to show (detected or manually selected)
+    if species_to_show:
+        # If detected, display it and show the dropdown below it
+        st.info(f"Automatically Identified: **{species_to_show}**")
+        profile_key = species_to_show
+        
+    else:
+        # If nothing detected, only show the dropdown
+        profile_key = st.selectbox(
+            "Or select a species manually:", 
+            options=[""] + list(BEE_PROFILES.keys()),
+            index=0,
+            key="species_manual_select" # Added key for consistent state management
+        )
+        
+    if profile_key and profile_key in BEE_PROFILES:
+        profile_html = BEE_PROFILES[profile_key]
+        st.markdown(profile_html, unsafe_allow_html=True)
+    elif not file and not species_to_show:
+         st.info("Upload an image and click 'Identify Primary Species' to see results here.")
 # ==========================================
 # 3. PEST DETECTOR 
 # ==========================================

@@ -338,15 +338,15 @@ with tabs[4]:
     st.header("Video Tracking")
     mode = st.radio("Target:",["Bees", "Pests"], horizontal=True)
     # >>> UPDATED FILE TYPES <<<
-    v_file = st.file_uploader("Upload Video", type=['mp4','mov','avi', 'hevc', 'HEIC'], key="vid_up")
+    v_file = st.file_uploader("Upload Video", type=['mp4','mov','avi', 'hevc', 'HEVC'], key="vid_up")
     
     if v_file:
-        if st.button("🎥 Start Tracking"):
+        if st.button("🎥 Start Tracking & Download"):
             
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
             
-            VIDEO_FRAME_SIZE = 512 # Max inference size remains 512x512 for model input
+            VIDEO_FRAME_SIZE = 512 # Max inference size for model input
             
             t_in_path = None
             t_out_path = None
@@ -367,7 +367,6 @@ with tabs[4]:
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 
                 # --- MODIFIED FOR ORIGINAL RESOLUTION OUTPUT ---
-                # We will use original resolution for output, resizing only for model inference if necessary.
                 w_out, h_out = w_orig, h_orig 
                 
                 t_out = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
@@ -378,7 +377,6 @@ with tabs[4]:
                 out = cv2.VideoWriter(t_out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w_out, h_out))
                 
                 frame_count = 0
-                total_sum = 0 
                 
                 progress_bar = st.progress(0, text="Processing video... Please wait, this might take a while for long videos.")
                 
@@ -402,13 +400,10 @@ with tabs[4]:
                     res = model(inference_frame, conf=track_conf, imgsz=VIDEO_FRAME_SIZE, verbose=False)[0] 
                     res.names = {i: mode[:-1] for i in range(len(res.names))}
                     
-                    total_sum += len(res.boxes)
-                    
                     # Plotting on the ORIGINAL-SIZED frame (frame)
-                    f_plot = res.plot(img=frame.copy(), line_width=1, font_size=15) # Use frame.copy() for plotting target
+                    f_plot = res.plot(img=frame.copy(), line_width=1, font_size=15)
                     
-                    # Add text overlay to the original sized frame
-                    cv2.putText(f_plot, f"Total Detections of {mode[:-1]}s: {total_sum}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+                    # --- REMOVED: Cumulative Sum Overlay Text ---
                     
                     # Write the annotated ORIGINAL-SIZED frame to the output
                     out.write(f_plot)
@@ -422,8 +417,7 @@ with tabs[4]:
                 out.release()
                 progress_bar.empty()
                 
-                # The summary now explicitly says "Total Detections"
-                st.success(f"✅ Processing Complete. A total sum of {total_sum} *detections* for {mode[:-1]}s was recorded across the entire video.")
+                st.success(f"✅ Processing Complete. Annotated video saved at original resolution.")
                 
                 # Re-encode to h264 for better browser compatibility, keeping the original resolution (w_out, h_out)
                 h264_path = t_out_path.replace('.mp4', '_h264.mp4')
@@ -446,9 +440,9 @@ with tabs[4]:
                 ''', unsafe_allow_html=True)
                 
                 st.download_button(
-                    label="📥 Download Tracked Video (Original Resolution)", 
+                    label="📥 Download Annotated Video (Original Resolution)", 
                     data=video_bytes, 
-                    file_name=f"tracked_{mode.lower()}_orig_res.mp4", 
+                    file_name=f"annotated_{mode.lower()}_orig_res.mp4", 
                     mime="video/mp4"
                 )
                 

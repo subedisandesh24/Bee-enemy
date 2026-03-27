@@ -212,7 +212,7 @@ with tabs[1]:
                 top = results[int(best_idx)]
                 species_name = top.names[int(top.boxes.cls[0])]
                 
-                # Set the state to the new result, which triggers a rerun to display ONLY the result
+                # Set the state to the new result, which triggers a rerun to display result AND info
                 st.session_state.detected_species = species_name
                 st.success(f"### Identified Species: {species_name} (Confidence: {top.boxes.conf[0]:.2f})")
                 
@@ -224,40 +224,31 @@ with tabs[1]:
             gc.collect()
             gc.collect()
 
-    # --- INFO DISPLAY SECTION (CONDITIONAL DISPLAY) ---
+    # --- INFORMATION DISPLAY SECTION (AUTOMATIC) ---
     
     st.markdown("---")
-    st.subheader("Species Information")
+    
+    # This section is ONLY visible if a species was detected in the last run
+    if st.session_state.detected_species:
+        
+        # Display the success message again (or you can rely on the one from the button click)
+        # For clarity in the information section, we will just proceed to show the info.
+        
+        profile_key = st.session_state.detected_species
+        
+        st.subheader(f"More Information on Identified Species: **{profile_key}**")
 
-    # The ONLY way to show the info box is by selecting from this dropdown.
-    species_to_show_manually = st.selectbox(
-        "Select a species to view details:", 
-        options=[""] + list(BEE_PROFILES.keys()),
-        index=0,
-        key="species_manual_select"
-    )
-    
-    profile_key = None
-    
-    # Check if user selected something from the dropdown
-    if species_to_show_manually:
-        profile_key = species_to_show_manually
-        
-    # If the user does NOT select anything, we show a placeholder message
-    else:
-        if st.session_state.detected_species:
-            # If a species was detected in the *previous* run, but the user has now
-            # cleared the manual selection (selected ""), show a prompt to select info.
-            st.info(f"Species detected previously: **{st.session_state.detected_species}**. Select a species from the list above to see its detailed profile.")
+        if profile_key in BEE_PROFILES:
+            profile_html = BEE_PROFILES[profile_key]
+            st.markdown(profile_html, unsafe_allow_html=True)
         else:
-            # If nothing detected and nothing selected
-            st.info("Upload an image and click 'Identify Primary Species' for a result, or select a species above to view its profile.")
-        
+             st.error(f"Profile data for {profile_key} is missing.")
+
+    elif file:
+        # If an image was uploaded but detection failed or hasn't run yet
+        st.info("Upload an image and click 'Identify Primary Species' to see the result and species information.")
     
-    # Display the profile box ONLY if a valid key was selected from the dropdown
-    if profile_key and profile_key in BEE_PROFILES:
-        profile_html = BEE_PROFILES[profile_key]
-        st.markdown(profile_html, unsafe_allow_html=True)
+    # The manual dropdown is now REMOVED entirely from this tab.
 # ==========================================
 # 3. PEST DETECTOR 
 # ==========================================

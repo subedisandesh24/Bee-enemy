@@ -40,6 +40,7 @@ conf_val = st.sidebar.slider("Confidence Threshold", min_value=0.10, max_value=1
 
 
 # --- CUSTOM CSS ---
+# --- CUSTOM CSS ---
 st.markdown("""
 <style>
     .stTabs[data-baseweb="tab-list"] { gap: 10px; }
@@ -53,7 +54,19 @@ st.markdown("""
     }
     .stImage > img { max-height: 75vh; object-fit: contain; display: block; margin: auto; }
     .footer { text-align: center; padding: 20px; font-weight: bold; color: #5a4609; border-top: 1px solid #ddd; margin-top: 50px;}
-    .bee-info { background-color: #fff9e6; padding: 20px; border-radius: 15px; border-left: 5px solid #ffc107; margin-top: 20px;}
+    
+    /* --- CHANGE THIS SECTION --- */
+    .bee-info { 
+        background-color: #fff9e6; 
+        padding: 20px; 
+        border-radius: 15px; 
+        border-left: 5px solid #ffc107; 
+        margin-top: 20px;
+        color: #000000 !important; /* Force all text inside to be black */
+    }
+    .bee-info h3, .bee-info p, .bee-info ul, .bee-info li {
+        color: #000000 !important; /* Explicitly force headers and list items to be black */
+    }
 </style>
 """, unsafe_allow_html=True)
 

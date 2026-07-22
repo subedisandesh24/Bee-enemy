@@ -1,9 +1,9 @@
-name: Keep Streamlit App Awake
+name: Keep Bee App Awake
 
 on:
   schedule:
     - cron: '0 */8 * * *' # Runs every 8 hours to reset the 12-hour timer
-  workflow_dispatch: # Allows you to trigger this manually
+  workflow_dispatch: # Allows you to run it manually
 
 jobs:
   keep-awake:

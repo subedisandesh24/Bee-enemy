@@ -14,10 +14,10 @@ import io
 import base64
 import time
 import gc
-# >>> ADDED FOR HEIC IMAGE SUPPORT <<<
+
+# >>> HEIC IMAGE SUPPORT <<<
 try:
     import pillow_heif
-    # Register the HEIF opener with Pillow (Fixed: Removed unknown option)
     pillow_heif.register_heif_opener()
     HEIC_SUPPORT = True
 except ImportError:
@@ -40,7 +40,6 @@ conf_val = st.sidebar.slider("Confidence Threshold", min_value=0.10, max_value=1
 
 
 # --- CUSTOM CSS ---
-# --- CUSTOM CSS ---
 st.markdown("""
 <style>
     .stTabs[data-baseweb="tab-list"] { gap: 10px; }
@@ -55,17 +54,16 @@ st.markdown("""
     .stImage > img { max-height: 75vh; object-fit: contain; display: block; margin: auto; }
     .footer { text-align: center; padding: 20px; font-weight: bold; color: #5a4609; border-top: 1px solid #ddd; margin-top: 50px;}
     
-    /* --- CHANGE THIS SECTION --- */
     .bee-info { 
         background-color: #fff9e6; 
         padding: 20px; 
         border-radius: 15px; 
         border-left: 5px solid #ffc107; 
         margin-top: 20px;
-        color: #000000 !important; /* Force all text inside to be black */
+        color: #000000 !important;
     }
     .bee-info h3, .bee-info p, .bee-info ul, .bee-info li {
-        color: #000000 !important; /* Explicitly force headers and list items to be black */
+        color: #000000 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -146,15 +144,11 @@ def load_models():
     e_path = os.path.join(base_dir, 'models', 'enemy_best.pt')
     return YOLO(b_path), YOLO(e_path)
 
-# *** MEMORY FIX: Reduced max_inference_size to 512 ***
 def process_image_memory_safe(file, max_inference_size=512):
     """Loads, converts, and resizes image for safe processing."""
-    # Image.open now attempts to handle HEIC due to pillow_heif registration
     img = Image.open(file).convert("RGB")
-    
     if max(img.size) > max_inference_size:
         img.thumbnail((max_inference_size, max_inference_size), Image.Resampling.LANCZOS)
-        
     return img
 
 def get_image_download(img_array):
@@ -175,7 +169,6 @@ tabs = st.tabs(["🔍 Bee Detector", "🧬 Bee Species ID & Info", "🛡️ Pest
 # ==========================================
 with tabs[0]:
     st.header("Bee Detector")
-    # >>> UPDATED FILE TYPES <<<
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg', 'heic', 'HEIC'], key="up1")
     
     if file:
@@ -200,27 +193,23 @@ with tabs[0]:
             gc.collect() 
 
 # ==========================================
-# 2. BEE SPECIES ID & INFO (Restructured - Conditional Display)
+# 2. BEE SPECIES ID & INFO
 # ==========================================
 with tabs[1]:
     st.header("Bee Species Identification")
     
-    # --- FILE UPLOADER & STATE MANAGEMENT ---
-    # >>> UPDATED FILE TYPES <<<
     uploaded_file = st.file_uploader(
         "Upload Image", 
         type=['jpg','png','jpeg', 'heic', 'HEIC'], 
         key="up2",
-        help="Limit is set by server environment (approx. 500MB). Images are resized to 512x512 for processing."
+        help="Images are resized to 512x512 for processing."
     )
     
-    # Initialize state if it doesn't exist
     if 'detected_species' not in st.session_state:
         st.session_state.detected_species = None
     if 'last_uploaded_file' not in st.session_state:
         st.session_state.last_uploaded_file = None
 
-    # RESET LOGIC: Clear detection result if a new, different file is uploaded
     if uploaded_file and uploaded_file != st.session_state.last_uploaded_file:
         st.session_state.detected_species = None
         st.session_state.last_uploaded_file = uploaded_file
@@ -241,46 +230,36 @@ with tabs[1]:
                 top = results[int(best_idx)]
                 species_name = top.names[int(top.boxes.cls[0])]
                 
-                # Set the state to the new result, which triggers a rerun to display result AND info
                 st.session_state.detected_species = species_name
                 st.success(f"### Identified Species: {species_name} (Confidence: {top.boxes.conf[0]:.2f})")
                 
             else: 
-                st.session_state.detected_species = None # Clear state if detection fails
+                st.session_state.detected_species = None
                 st.warning("No bees detected for identification at this confidence level.")
             
             del img, results
             gc.collect()
             gc.collect()
 
-    # --- INFORMATION DISPLAY SECTION (AUTOMATIC) ---
-    
     st.markdown("---")
     
-    # This section is ONLY visible if a species was detected in the last run
     if st.session_state.detected_species:
-        
         profile_key = st.session_state.detected_species
-        
         st.subheader(f"More Information on Identified Species: **{profile_key}**")
 
         if profile_key in BEE_PROFILES:
             profile_html = BEE_PROFILES[profile_key]
             st.markdown(profile_html, unsafe_allow_html=True)
         else:
-             st.error(f"Profile data for {profile_key} is missing.")
-
+            st.error(f"Profile data for {profile_key} is missing.")
     elif file:
-        # If an image was uploaded but detection failed or hasn't run yet
         st.info("Upload an image and click 'Identify Primary Species' to see the result and species information.")
-    
-    # The manual dropdown is now REMOVED entirely from this tab.
+
 # ==========================================
 # 3. PEST DETECTOR 
 # ==========================================
 with tabs[2]:
     st.header("Bee Enemy Detector")
-    # >>> UPDATED FILE TYPES <<<
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg', 'heic', 'HEIC'], key="up3")
     if file:
         img = process_image_memory_safe(file, max_inference_size=512)
@@ -306,61 +285,61 @@ with tabs[2]:
             gc.collect()
 
 # ==========================================
-# 4. PEST SPECIES ID (Only Name/Confidence + Download)
+# 4. PEST SPECIES ID (Classification Only - Single ID)
 # ==========================================
 with tabs[3]:
-    st.header("Pest Species Identification")
-    # >>> UPDATED FILE TYPES <<<
+    st.header("Pest Species Classification")
     file = st.file_uploader("Upload Image", type=['jpg','png','jpeg', 'heic', 'HEIC'], key="up4")
+    
     if file:
         img = process_image_memory_safe(file, max_inference_size=512)
         st.image(img, width=zoom_val)
         
-        if st.button("🦠 Identify Primary Pest", key="btn4"):
-            results = enemy_model(img, conf=0.25, imgsz=512, verbose=False)[0]
+        if st.button("🦠 Classify Pest Species", key="btn4"):
+            # Run inference without plotting bounding boxes
+            results = enemy_model(img, conf=conf_val, imgsz=512, verbose=False)[0]
             
-            if len(results.boxes) > 0:
-                best_idx = np.argmax(results.boxes.conf.cpu().numpy())
-                top = results[int(best_idx)]
-                
-                # --- ADJUSTMENT: Display ONLY name/confidence and the image plot (No extra download button) ---
-                st.warning(f"### Detected Threat: {top.names[int(top.boxes.cls[0])]} (Conf: {top.boxes.conf[0]:.2f})")
-                st.image(top.plot(line_width=1, font_size=10), width=zoom_val)
-                
-                # Keeping the *original* download button for the annotated image (from Tab 2 logic)
-                st.download_button(
-                    label="📥 Download Annotated Image",
-                    data=get_image_download(top.plot(line_width=1, font_size=10)),
-                    file_name="pest_result.jpg"
-                )
-                
-            else: 
-                st.info("No threats identified.")
+            pest_name = None
+            conf_score = 0.0
+
+            # 1. Native YOLO Classification model support (.probs)
+            if hasattr(results, 'probs') and results.probs is not None:
+                top1_idx = int(results.probs.top1)
+                pest_name = results.names[top1_idx]
+                conf_score = float(results.probs.top1conf.cpu().item())
+            
+            # 2. YOLO Detection model as classification (extract top-1 highest confidence pest, NO boxes)
+            elif hasattr(results, 'boxes') and results.boxes is not None and len(results.boxes) > 0:
+                best_idx = int(np.argmax(results.boxes.conf.cpu().numpy()))
+                pest_name = results.names[int(results.boxes.cls[best_idx])]
+                conf_score = float(results.boxes.conf[best_idx].cpu().item())
+
+            # Display exactly ONE classification result
+            if pest_name:
+                st.warning(f"### 🚨 Identified Threat: **{pest_name}**")
+                st.metric(label="Identification Confidence", value=f"{conf_score * 100:.2f}%")
+            else:
+                st.info("No pests or threats identified at this confidence level.")
                 
             del img, results
             gc.collect()
             gc.collect()
 
 # ==========================================
-# 5. VIDEO TRACKING (Resized for Stability - Same logic as before)
+# 5. VIDEO TRACKING
 # ==========================================
 with tabs[4]:
     st.header("Video Tracking")
-    mode = st.radio("Target:",["Bees", "Pests"], horizontal=True)
-    # >>> UPDATED FILE TYPES <<<
+    mode = st.radio("Target:", ["Bees", "Pests"], horizontal=True)
     v_file = st.file_uploader("Upload Video", type=['mp4','mov','avi', 'hevc', 'HEVC'], key="vid_up")
     
     if v_file:
-        if st.button("🎥 Start Tracking"): # Changed button text to match original for simplicity
-            
+        if st.button("🎥 Start Tracking"):
             track_conf = conf_val if mode == "Bees" else 0.65
             model = bee_model if mode == "Bees" else enemy_model
             
             VIDEO_FRAME_SIZE = 512
-            
-            t_in_path = None
-            t_out_path = None
-            h264_path = None
+            t_in_path, t_out_path, h264_path = None, None, None
             
             try:
                 t_in = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
@@ -369,14 +348,12 @@ with tabs[4]:
                 t_in.close()
                 
                 cap = cv2.VideoCapture(t_in_path)
-                
                 w_orig = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 h_orig = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 fps = cap.get(cv2.CAP_PROP_FPS)
                 if fps == 0 or np.isnan(fps): fps = 30 
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 
-                # --- RESIZING FOR STABILITY (Back to previous safe setting) ---
                 if max(w_orig, h_orig) > VIDEO_FRAME_SIZE:
                     scale = VIDEO_FRAME_SIZE / float(max(w_orig, h_orig))
                     w_out, h_out = int(w_orig * scale), int(h_orig * scale)
@@ -388,11 +365,9 @@ with tabs[4]:
                 t_out.close()
                 
                 out = cv2.VideoWriter(t_out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w_out, h_out))
-                
                 frame_count = 0
-                total_sum = 0 
                 
-                progress_bar = st.progress(0, text="Processing video... Please wait, this might take a while for long videos.")
+                progress_bar = st.progress(0, text="Processing video...")
                 
                 while cap.isOpened():
                     ret, frame = cap.read()
@@ -405,10 +380,7 @@ with tabs[4]:
                     res = model(frame, conf=track_conf, imgsz=VIDEO_FRAME_SIZE, verbose=False)[0] 
                     res.names = {i: mode[:-1] for i in range(len(res.names))}
                     
-                    total_sum += len(res.boxes)
-                    
                     f_plot = res.plot(line_width=1, font_size=10)
-                    # --- REMOVED: Cumulative Sum Text Overlay ---
                     out.write(f_plot)
                     
                     if frame_count % 100 == 0: 
@@ -420,7 +392,7 @@ with tabs[4]:
                 out.release()
                 progress_bar.empty()
                 
-                st.success(f"✅ Processing Complete. Annotated video processed.")
+                st.success("✅ Processing Complete.")
                 
                 h264_path = t_out_path.replace('.mp4', '_h264.mp4')
                 os.system(f"ffmpeg -y -i {t_out_path} -vcodec libx264 -preset veryfast -crf 23 {h264_path} > /dev/null 2>&1")
